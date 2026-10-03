@@ -110,6 +110,15 @@
     <circle cx="8" cy="8" r="6.5"/>
     <path d="M8 4.5v3.8l2.5 1.5"/>
   </symbol>
+  <symbol id="ic-credit-card" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
+    <path d="M1.5 6.5h13"/>
+    <path d="M4 10.5h2.5"/>
+  </symbol>
+  <symbol id="ic-bank" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1.5 6 8 2.5 14.5 6"/>
+    <path d="M3 6v6M6.3 6v6M9.7 6v6M13 6v6M1.5 12h13M1 14h14"/>
+  </symbol>
 </svg>
 
 <!-- helper: inline SVG icon -->
@@ -372,13 +381,17 @@
         <svg class="ic"><use href="#ic-key"/></svg>
         <span>Passwords</span>
       </button>
-      <button type="button" class="vault-nav-tab" data-tab="journal" id="tab-journal-btn">
-        <svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>
-        <span>Journal</span>
+      <button type="button" class="vault-nav-tab" data-tab="cards" id="tab-cards-btn">
+        <svg class="ic" style="color:#a855f7"><use href="#ic-credit-card"/></svg>
+        <span>Cards</span>
       </button>
       <button type="button" class="vault-nav-tab" data-tab="docs" id="tab-docs-btn">
         <svg class="ic" style="color:#38bdf8"><use href="#ic-id-card"/></svg>
         <span>Docs</span>
+      </button>
+      <button type="button" class="vault-nav-tab" data-tab="journal" id="tab-journal-btn">
+        <svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>
+        <span>Journal</span>
       </button>
     </div>
     <div class="vault-actions">
@@ -414,20 +427,25 @@
     <main id="vault-list" class="vault-list"></main>
   </div>
 
-  <!-- ── Journal / Mi Notes View ─────────────────────────────── -->
-  <div id="vault-view-journal" class="vault-tab-view hidden">
+  <!-- ── Credit / Debit Cards & Banks View ─────────────────────── -->
+  <div id="vault-view-cards" class="vault-tab-view hidden">
     <div class="journal-search-wrap">
-      <div class="journal-filter-row">
-        <button type="button" class="journal-pill active" id="journal-pill-all">All</button>
-        <span id="journal-count-badge" class="journal-counter">0 notes</span>
+      <div class="journal-filter-row" style="flex-wrap: wrap; gap: 8px;">
+        <div class="docs-filter-pills" id="cards-category-pills">
+          <button type="button" class="journal-pill active" data-card-filter="all">All</button>
+          <button type="button" class="journal-pill" data-card-filter="credit">Credit</button>
+          <button type="button" class="journal-pill" data-card-filter="debit">Debit</button>
+          <button type="button" class="journal-pill" data-card-filter="bank">Banks</button>
+        </div>
+        <span id="cards-count-badge" class="journal-counter">0 cards</span>
       </div>
       <div class="journal-input-wrap">
         <svg class="ic search-icon"><use href="#ic-search"/></svg>
-        <input type="search" id="journal-search" placeholder="Search journal & notes…" autocomplete="off" spellcheck="false" />
+        <input type="search" id="cards-search" placeholder="Search cards by bank, holder name, last 4 digits…" autocomplete="off" spellcheck="false" />
       </div>
     </div>
 
-    <main id="journal-grid" class="journal-grid"></main>
+    <main id="cards-grid" class="cards-grid"></main>
   </div>
 
   <!-- ── Emergency Documents View ─────────────────────────────── -->
@@ -451,6 +469,22 @@
     <main id="docs-grid" class="docs-grid"></main>
   </div>
 
+  <!-- ── Journal / Mi Notes View ─────────────────────────────── -->
+  <div id="vault-view-journal" class="vault-tab-view hidden">
+    <div class="journal-search-wrap">
+      <div class="journal-filter-row">
+        <button type="button" class="journal-pill active" id="journal-pill-all">All</button>
+        <span id="journal-count-badge" class="journal-counter">0 notes</span>
+      </div>
+      <div class="journal-input-wrap">
+        <svg class="ic search-icon"><use href="#ic-search"/></svg>
+        <input type="search" id="journal-search" placeholder="Search journal & notes…" autocomplete="off" spellcheck="false" />
+      </div>
+    </div>
+
+    <main id="journal-grid" class="journal-grid"></main>
+  </div>
+
   <!-- Mobile Floating Action Button (dynamically styled/routed) -->
   <button class="btn-fab" id="vault-fab-btn" title="Add" aria-label="Add">
     <svg class="ic-lg"><use href="#ic-plus"/></svg>
@@ -467,12 +501,12 @@
       </div>
       <span class="bottom-tab-label">Passwords</span>
     </button>
-    <button type="button" class="vault-bottom-tab" data-tab="journal" id="bottom-tab-journal" aria-label="Journal">
+    <button type="button" class="vault-bottom-tab" data-tab="cards" id="bottom-tab-cards" aria-label="Cards">
       <div class="bottom-tab-icon-wrap">
-        <svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>
-        <span class="bottom-tab-badge" id="bottom-badge-journal" style="display:none">0</span>
+        <svg class="ic" style="color:#a855f7"><use href="#ic-credit-card"/></svg>
+        <span class="bottom-tab-badge" id="bottom-badge-cards" style="display:none">0</span>
       </div>
-      <span class="bottom-tab-label">Journal</span>
+      <span class="bottom-tab-label">Cards</span>
     </button>
     <button type="button" class="vault-bottom-tab" data-tab="docs" id="bottom-tab-docs" aria-label="Docs">
       <div class="bottom-tab-icon-wrap">
@@ -480,6 +514,13 @@
         <span class="bottom-tab-badge" id="bottom-badge-docs" style="display:none">0</span>
       </div>
       <span class="bottom-tab-label">Docs</span>
+    </button>
+    <button type="button" class="vault-bottom-tab" data-tab="journal" id="bottom-tab-journal" aria-label="Journal">
+      <div class="bottom-tab-icon-wrap">
+        <svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>
+        <span class="bottom-tab-badge" id="bottom-badge-journal" style="display:none">0</span>
+      </div>
+      <span class="bottom-tab-label">Journal</span>
     </button>
   </nav>
 </div>
@@ -589,6 +630,222 @@
       <div class="modal-footer-right">
         <button class="btn-secondary" id="modal-entry-cancel">Cancel</button>
         <button class="btn-primary"   id="modal-entry-save">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     MODAL — Add / Edit Credit/Debit Card or Bank Account
+════════════════════════════════════════════════════════════════ -->
+<div id="modal-card" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box modal-box-lg">
+    <div class="modal-handle-bar"></div>
+    <div class="modal-header">
+      <h2 id="modal-card-title">Add Card / Bank</h2>
+      <button class="btn-icon" id="modal-card-close">
+        <svg class="ic"><use href="#ic-close"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <!-- Item Type Segmented Toggle -->
+      <div class="card-type-toggle-row">
+        <button type="button" class="card-type-toggle-btn active" id="btn-toggle-type-card" data-type="card">
+          <svg class="ic ic-sm"><use href="#ic-credit-card"/></svg>
+          <span>Payment Card</span>
+        </button>
+        <button type="button" class="card-type-toggle-btn" id="btn-toggle-type-bank" data-type="bank">
+          <svg class="ic ic-sm"><use href="#ic-bank"/></svg>
+          <span>Bank Account</span>
+        </button>
+      </div>
+
+      <!-- Quick Bank Presets -->
+      <div class="doc-preset-row">
+        <span class="hint small" style="margin-bottom:4px;display:block">Popular Presets:</span>
+        <div class="doc-preset-chips" id="bank-preset-chips">
+          <button type="button" class="doc-preset-btn" data-bank-preset="hdfc">🔵 HDFC</button>
+          <button type="button" class="doc-preset-btn" data-bank-preset="sbi">🔷 SBI</button>
+          <button type="button" class="doc-preset-btn" data-bank-preset="icici">🔴 ICICI</button>
+          <button type="button" class="doc-preset-btn" data-bank-preset="axis">🟣 Axis</button>
+          <button type="button" class="doc-preset-btn" data-bank-preset="kotak">🔺 Kotak</button>
+          <button type="button" class="doc-preset-btn" data-bank-preset="amex">💳 Amex</button>
+          <button type="button" class="doc-preset-btn" data-bank-preset="rupay">🇮🇳 RuPay</button>
+        </div>
+      </div>
+
+      <!-- Live Digital Card Preview (shown for Card mode) -->
+      <div id="card-preview-container" class="card-preview-wrapper">
+        <div id="card-live-preview" class="digital-card card-theme-black">
+          <div class="card-top-row">
+            <span class="card-preview-bank" id="prev-bank-name">BANK NAME</span>
+            <span class="card-preview-badge" id="prev-card-type">CREDIT</span>
+          </div>
+          <div class="card-chip-row">
+            <div class="card-emv-chip">
+              <div class="chip-line horizontal"></div>
+              <div class="chip-line vertical"></div>
+            </div>
+            <div class="card-contactless-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8.5 16.5a5 5 0 0 1 0-9"/><path d="M12 19a8.5 8.5 0 0 0 0-14"/><path d="M15.5 21.5a12 12 0 0 0 0-19"/></svg>
+            </div>
+          </div>
+          <div class="card-preview-number" id="prev-card-number">•••• •••• •••• ••••</div>
+          <div class="card-bottom-row">
+            <div class="card-preview-meta">
+              <span class="card-meta-label">CARDHOLDER</span>
+              <span class="card-meta-val" id="prev-card-holder">YOUR NAME</span>
+            </div>
+            <div class="card-preview-meta">
+              <span class="card-meta-label">EXPIRES</span>
+              <span class="card-meta-val" id="prev-card-expiry">MM/YY</span>
+            </div>
+            <div class="card-network-logo" id="prev-card-network">VISA</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card-specific Fields -->
+      <div id="fields-payment-card">
+        <div class="field-row-2">
+          <div class="field">
+            <label>Card Label / Bank *</label>
+            <input type="text" id="card-bank-name" placeholder="e.g. HDFC Regalia, ICICI Amazon Pay" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>Card Type</label>
+            <select id="card-type-select" class="select-field">
+              <option value="credit">Credit Card</option>
+              <option value="debit">Debit Card</option>
+              <option value="prepaid">Prepaid / Virtual Card</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Cardholder Name *</label>
+          <input type="text" id="card-holder-name" placeholder="Full name as printed on card" autocomplete="off" />
+        </div>
+
+        <div class="field">
+          <label>Card Number *</label>
+          <div class="input-wrap">
+            <input type="text" id="card-number" placeholder="4111 2222 3333 4444" autocomplete="off" spellcheck="false" inputmode="numeric" style="font-family:var(--mono); letter-spacing:1px;" />
+            <span class="card-network-pill" id="card-detected-network">VISA</span>
+          </div>
+        </div>
+
+        <div class="field-row-2">
+          <div class="field">
+            <label>Expiry Date * (MM/YY)</label>
+            <input type="text" id="card-expiry" placeholder="12/28" maxlength="5" inputmode="numeric" style="font-family:var(--mono);" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>CVV / CVC *</label>
+            <div class="input-wrap">
+              <input type="password" id="card-cvv" placeholder="•••" maxlength="4" inputmode="numeric" style="font-family:var(--mono);" autocomplete="off" />
+              <button type="button" class="toggle-pw" data-target="card-cvv">
+                <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-row-2">
+          <div class="field">
+            <label>ATM / Transaction PIN <span class="hint small">(Optional)</span></label>
+            <div class="input-wrap">
+              <input type="password" id="card-pin" placeholder="••••" maxlength="6" inputmode="numeric" style="font-family:var(--mono);" autocomplete="off" />
+              <button type="button" class="toggle-pw" data-target="card-pin">
+                <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Color Theme</label>
+            <div class="card-theme-palette" id="card-theme-palette">
+              <button type="button" class="theme-swatch card-theme-black active" data-theme="card-theme-black" title="Obsidian Black"></button>
+              <button type="button" class="theme-swatch card-theme-hdfc" data-theme="card-theme-hdfc" title="HDFC Sapphire"></button>
+              <button type="button" class="theme-swatch card-theme-sbi" data-theme="card-theme-sbi" title="SBI Ocean"></button>
+              <button type="button" class="theme-swatch card-theme-icici" data-theme="card-theme-icici" title="ICICI Ruby"></button>
+              <button type="button" class="theme-swatch card-theme-axis" data-theme="card-theme-axis" title="Axis Burgundy"></button>
+              <button type="button" class="theme-swatch card-theme-kotak" data-theme="card-theme-kotak" title="Kotak Cardinal"></button>
+              <button type="button" class="theme-swatch card-theme-emerald" data-theme="card-theme-emerald" title="Emerald Jade"></button>
+              <button type="button" class="theme-swatch card-theme-gold" data-theme="card-theme-gold" title="Champagne Gold"></button>
+              <button type="button" class="theme-swatch card-theme-purple" data-theme="card-theme-purple" title="Royal Violet"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bank Account Fields -->
+      <div id="fields-bank-account" class="hidden">
+        <div class="field-row-2">
+          <div class="field">
+            <label>Bank Name *</label>
+            <input type="text" id="bank-account-bank" placeholder="e.g. HDFC Bank, State Bank of India" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>Account Type</label>
+            <select id="bank-account-type" class="select-field">
+              <option value="savings">Savings Account</option>
+              <option value="current">Current Account</option>
+              <option value="salary">Salary Account</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Account Holder Name *</label>
+          <input type="text" id="bank-account-holder" placeholder="Name as registered with bank" autocomplete="off" />
+        </div>
+
+        <div class="field-row-2">
+          <div class="field">
+            <label>Account Number *</label>
+            <input type="text" id="bank-account-number" placeholder="e.g. 50100234567890" autocomplete="off" spellcheck="false" style="font-family:var(--mono);" />
+          </div>
+          <div class="field">
+            <label>IFSC Code *</label>
+            <input type="text" id="bank-account-ifsc" placeholder="e.g. HDFC0001234" autocomplete="off" spellcheck="false" style="font-family:var(--mono); text-transform:uppercase;" />
+          </div>
+        </div>
+
+        <div class="field-row-2">
+          <div class="field">
+            <label>Branch Name <span class="hint small">(Optional)</span></label>
+            <input type="text" id="bank-account-branch" placeholder="Branch / City" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>UPI ID / VPA <span class="hint small">(Optional)</span></label>
+            <input type="text" id="bank-account-upi" placeholder="username@bank" autocomplete="off" spellcheck="false" style="font-family:var(--mono);" />
+          </div>
+        </div>
+
+        <div class="field-row-2">
+          <div class="field">
+            <label>Customer ID / CIF <span class="hint small">(Optional)</span></label>
+            <input type="text" id="bank-account-cif" placeholder="Customer ID" autocomplete="off" spellcheck="false" style="font-family:var(--mono);" />
+          </div>
+          <div class="field">
+            <label>NetBanking User ID <span class="hint small">(Optional)</span></label>
+            <input type="text" id="bank-account-netbanking-id" placeholder="Login ID" autocomplete="off" spellcheck="false" style="font-family:var(--mono);" />
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Notes <span class="hint small">(Optional)</span></label>
+        <textarea id="card-notes" rows="2" placeholder="Credit limit, billing cycle, branch manager contact…"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-danger hidden" id="modal-card-delete">Delete</button>
+      <div class="modal-footer-right">
+        <button class="btn-secondary" id="modal-card-cancel">Cancel</button>
+        <button class="btn-primary"   id="modal-card-save">Save</button>
       </div>
     </div>
   </div>

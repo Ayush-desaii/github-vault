@@ -84,6 +84,13 @@ const state = {
 
   // Temporary list of attached files in doc modal
   currentDocDraftFiles: [],
+
+  // Cards & Banks state
+  cardsSearchQuery: '',
+  cardCategoryFilter: 'all',
+  editingCardId: null,
+  selectedCardTheme: 'card-theme-black',
+  cardMode: 'card', // 'card' | 'bank'
 };
 
 // ─── Screen Management ────────────────────────────────────────────────────────
@@ -555,7 +562,8 @@ function initSetupWizard() {
 
         state.vault     = data;
         if (state.vault && !state.vault.notes) state.vault.notes = [];
-        if (state.vault && !state.vault.docs) state.vault.docs = [];
+        if (state.vault && !state.vault.docs)  state.vault.docs  = [];
+        if (state.vault && !state.vault.cards) state.vault.cards = [];
         state.vaultKey     = key;
         state.vaultSalt    = salt;
         state.masterSecret = masterSecret;
@@ -583,6 +591,7 @@ function initSetupWizard() {
         entries:    [],
         notes:      [],
         docs:       [],
+        cards:      [],
         created_at: new Date().toISOString(),
       };
 
@@ -820,6 +829,7 @@ async function handleFullUnlock(quickType) {
     state.vault     = data;
     if (state.vault && !state.vault.notes) state.vault.notes = [];
     if (state.vault && !state.vault.docs)  state.vault.docs  = [];
+    if (state.vault && !state.vault.cards) state.vault.cards = [];
     state.vaultKey     = key;
     state.vaultSalt    = salt;
     state.vaultSha     = sessionGet('vault_sha');
@@ -883,6 +893,7 @@ async function handleQuickUnlock(quickSecret) {
     state.vault     = data;
     if (state.vault && !state.vault.notes) state.vault.notes = [];
     if (state.vault && !state.vault.docs)  state.vault.docs  = [];
+    if (state.vault && !state.vault.cards) state.vault.cards = [];
     state.vaultKey  = key;
     state.vaultSalt = salt;
     state.vaultBlob = blob;
@@ -913,7 +924,7 @@ function lockVault() {
   stopTotpTicker();
 
   // Hide all modals so orphaned dialogs don't stay visible on locked screen
-  ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer', 'modal-settings'].forEach(id => {
+  ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer', 'modal-settings', 'modal-card'].forEach(id => {
     hideModal(id);
   });
 
@@ -1358,16 +1369,18 @@ function switchVaultTab(tab) {
     }
   });
 
-  const pwView   = document.getElementById('vault-view-passwords');
-  const jrnView  = document.getElementById('vault-view-journal');
-  const docsView = document.getElementById('vault-view-docs');
-  const fab      = document.getElementById('vault-fab-btn');
+  const pwView    = document.getElementById('vault-view-passwords');
+  const cardsView = document.getElementById('vault-view-cards');
+  const jrnView   = document.getElementById('vault-view-journal');
+  const docsView  = document.getElementById('vault-view-docs');
+  const fab       = document.getElementById('vault-fab-btn');
 
   pwView?.classList.add('hidden');
+  cardsView?.classList.add('hidden');
   jrnView?.classList.add('hidden');
   docsView?.classList.add('hidden');
 
-  fab?.classList.remove('fab-journal', 'fab-docs');
+  fab?.classList.remove('fab-journal', 'fab-docs', 'fab-cards');
 
   const brandTitle = document.getElementById('vault-brand-title');
   const brandIcon  = document.getElementById('vault-brand-icon');
@@ -1380,6 +1393,15 @@ function switchVaultTab(tab) {
     if (brandIcon) brandIcon.innerHTML = `<svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>`;
     renderJournalList();
     const grid = document.getElementById('journal-grid');
+    if (grid) grid.scrollTop = 0;
+  } else if (tab === 'cards') {
+    stopTotpTicker();
+    cardsView?.classList.remove('hidden');
+    fab?.classList.add('fab-cards');
+    if (brandTitle) brandTitle.textContent = 'Cards & Banks';
+    if (brandIcon) brandIcon.innerHTML = `<svg class="ic" style="color:#a855f7"><use href="#ic-credit-card"/></svg>`;
+    renderCardsList();
+    const grid = document.getElementById('cards-grid');
     if (grid) grid.scrollTop = 0;
   } else if (tab === 'docs') {
     stopTotpTicker();
@@ -1403,9 +1425,10 @@ function switchVaultTab(tab) {
 }
 
 function updateNavBadges() {
-  const pwCount  = state.vault?.entries?.length || 0;
-  const jrnCount = state.vault?.notes?.length || 0;
-  const docCount = state.vault?.docs?.length || 0;
+  const pwCount   = state.vault?.entries?.length || 0;
+  const cardCount = state.vault?.cards?.length   || 0;
+  const docCount  = state.vault?.docs?.length    || 0;
+  const jrnCount  = state.vault?.notes?.length   || 0;
 
   const updateBadge = (id, count) => {
     const el = document.getElementById(id);
@@ -1419,8 +1442,9 @@ function updateNavBadges() {
   };
 
   updateBadge('bottom-badge-passwords', pwCount);
-  updateBadge('bottom-badge-journal',   jrnCount);
+  updateBadge('bottom-badge-cards',     cardCount);
   updateBadge('bottom-badge-docs',      docCount);
+  updateBadge('bottom-badge-journal',   jrnCount);
 }
 
 function formatJournalCardDate(isoString) {
@@ -2209,6 +2233,586 @@ async function viewDocFile(docId, fileId) {
   }
 }
 
+// ─── Credit / Debit Cards & Bank Presets ─────────────────────────────────────
+
+const BANK_PRESETS = {
+  hdfc: {
+    name: 'HDFC Bank',
+    theme: 'card-theme-hdfc',
+    cardType: 'credit',
+    ifscPrefix: 'HDFC000',
+  },
+  sbi: {
+    name: 'State Bank of India',
+    theme: 'card-theme-sbi',
+    cardType: 'debit',
+    ifscPrefix: 'SBIN000',
+  },
+  icici: {
+    name: 'ICICI Bank',
+    theme: 'card-theme-icici',
+    cardType: 'credit',
+    ifscPrefix: 'ICIC000',
+  },
+  axis: {
+    name: 'Axis Bank',
+    theme: 'card-theme-axis',
+    cardType: 'credit',
+    ifscPrefix: 'UTIB000',
+  },
+  kotak: {
+    name: 'Kotak Mahindra Bank',
+    theme: 'card-theme-kotak',
+    cardType: 'debit',
+    ifscPrefix: 'KKBK000',
+  },
+  amex: {
+    name: 'American Express',
+    theme: 'card-theme-gold',
+    cardType: 'credit',
+    ifscPrefix: '',
+  },
+  rupay: {
+    name: 'RuPay Card',
+    theme: 'card-theme-emerald',
+    cardType: 'credit',
+    ifscPrefix: '',
+  },
+};
+
+function detectCardNetwork(number) {
+  const clean = (number || '').replace(/\D/g, '');
+  if (/^4/.test(clean)) return 'visa';
+  if (/^(5[1-5]|2[2-7])/.test(clean)) return 'mastercard';
+  if (/^(60|6521|6522|508)/.test(clean)) return 'rupay';
+  if (/^3[47]/.test(clean)) return 'amex';
+  if (/^(6011|65|64[4-9])/.test(clean)) return 'discover';
+  return 'other';
+}
+
+function formatCardNumber(num, network = 'other') {
+  const digits = (num || '').replace(/\D/g, '').slice(0, 16);
+  if (network === 'amex') {
+    const p1 = digits.slice(0, 4);
+    const p2 = digits.slice(4, 10);
+    const p3 = digits.slice(10, 15);
+    return [p1, p2, p3].filter(Boolean).join(' ');
+  }
+  const parts = [];
+  for (let i = 0; i < digits.length; i += 4) {
+    parts.push(digits.slice(i, i + 4));
+  }
+  return parts.join(' ');
+}
+
+function formatCardExpiry(val) {
+  const digits = (val || '').replace(/\D/g, '').slice(0, 4);
+  if (digits.length >= 3) {
+    return digits.slice(0, 2) + '/' + digits.slice(2);
+  }
+  return digits;
+}
+
+function maskCardNumber(num) {
+  const digits = (num || '').replace(/\D/g, '');
+  if (digits.length <= 4) return digits || '••••';
+  const last4 = digits.slice(-4);
+  if (digits.length === 15) {
+    return `•••• •••••• •${last4}`;
+  }
+  return `•••• •••• •••• ${last4}`;
+}
+
+function setCardModalMode(mode) {
+  state.cardMode = mode;
+  const isCard = mode === 'card';
+
+  document.getElementById('btn-toggle-type-card')?.classList.toggle('active', isCard);
+  document.getElementById('btn-toggle-type-bank')?.classList.toggle('active', !isCard);
+
+  document.getElementById('card-preview-container')?.classList.toggle('hidden', !isCard);
+  document.getElementById('fields-payment-card')?.classList.toggle('hidden', !isCard);
+  document.getElementById('fields-bank-account')?.classList.toggle('hidden', isCard);
+
+  const title = document.getElementById('modal-card-title');
+  if (title) {
+    if (state.editingCardId) {
+      title.textContent = isCard ? 'Edit Payment Card' : 'Edit Bank Account';
+    } else {
+      title.textContent = isCard ? 'Add Payment Card' : 'Add Bank Account';
+    }
+  }
+}
+
+function selectCardTheme(theme) {
+  state.selectedCardTheme = theme;
+  document.querySelectorAll('#card-theme-palette .theme-swatch').forEach(sw => {
+    sw.classList.toggle('active', sw.dataset.theme === theme);
+  });
+  updateLiveCardPreview();
+}
+
+function applyBankPreset(key) {
+  const preset = BANK_PRESETS[key];
+  if (!preset) return;
+
+  if (state.cardMode === 'card') {
+    const bankInput = document.getElementById('card-bank-name');
+    if (bankInput) bankInput.value = preset.name;
+    const typeSelect = document.getElementById('card-type-select');
+    if (typeSelect && preset.cardType) typeSelect.value = preset.cardType;
+    selectCardTheme(preset.theme);
+  } else {
+    const bankInput = document.getElementById('bank-account-bank');
+    if (bankInput) bankInput.value = preset.name;
+    const ifscInput = document.getElementById('bank-account-ifsc');
+    if (ifscInput && preset.ifscPrefix && !ifscInput.value) {
+      ifscInput.value = preset.ifscPrefix;
+    }
+  }
+}
+
+function updateLiveCardPreview() {
+  const bankInput   = document.getElementById('card-bank-name');
+  const typeSelect  = document.getElementById('card-type-select');
+  const holderInput = document.getElementById('card-holder-name');
+  const numInput    = document.getElementById('card-number');
+  const expInput    = document.getElementById('card-expiry');
+
+  const previewCard  = document.getElementById('card-live-preview');
+  const prevBank     = document.getElementById('prev-bank-name');
+  const prevType     = document.getElementById('prev-card-type');
+  const prevHolder   = document.getElementById('prev-card-holder');
+  const prevNum      = document.getElementById('prev-card-number');
+  const prevExp      = document.getElementById('prev-card-expiry');
+  const prevNet      = document.getElementById('prev-card-network');
+  const detectedPill = document.getElementById('card-detected-network');
+
+  const bankVal   = bankInput?.value.trim()   || 'BANK NAME';
+  const typeVal   = typeSelect?.value         || 'credit';
+  const holderVal = holderInput?.value.trim() || 'YOUR NAME';
+  const rawNum    = (numInput?.value || '').replace(/\D/g, '');
+  const expVal    = expInput?.value.trim()    || 'MM/YY';
+
+  const network = detectCardNetwork(rawNum);
+
+  if (prevBank) prevBank.textContent = bankVal.toUpperCase();
+  if (prevType) prevType.textContent = typeVal.toUpperCase();
+  if (prevHolder) prevHolder.textContent = holderVal.toUpperCase();
+  if (prevExp) prevExp.textContent = expVal;
+
+  const netDisplay = network === 'mastercard' ? 'Mastercard' : (network === 'rupay' ? 'RuPay' : (network === 'amex' ? 'AMEX' : (network === 'discover' ? 'Discover' : 'VISA')));
+  if (prevNet) prevNet.textContent = netDisplay;
+  if (detectedPill) detectedPill.textContent = netDisplay;
+
+  if (prevNum) {
+    if (!rawNum) {
+      prevNum.textContent = '•••• •••• •••• ••••';
+    } else {
+      prevNum.textContent = formatCardNumber(rawNum, network);
+    }
+  }
+
+  if (previewCard) {
+    const allThemes = ['card-theme-black', 'card-theme-hdfc', 'card-theme-sbi', 'card-theme-icici', 'card-theme-axis', 'card-theme-kotak', 'card-theme-emerald', 'card-theme-gold', 'card-theme-purple'];
+    allThemes.forEach(t => previewCard.classList.remove(t));
+    previewCard.classList.add(state.selectedCardTheme || 'card-theme-black');
+  }
+}
+
+function openCardModal(id = null) {
+  state.editingCardId = id;
+
+  const card = id ? state.vault?.cards?.find(c => c.id === id) : null;
+  const mode = card ? (card.type || 'card') : 'card';
+  setCardModalMode(mode);
+
+  if (card) {
+    document.getElementById('modal-card-title').textContent = mode === 'card' ? 'Edit Payment Card' : 'Edit Bank Account';
+    document.getElementById('modal-card-delete')?.classList.remove('hidden');
+
+    if (mode === 'card') {
+      document.getElementById('card-bank-name').value   = card.bank_name   || '';
+      document.getElementById('card-type-select').value = card.card_type   || 'credit';
+      document.getElementById('card-holder-name').value = card.card_holder || '';
+      document.getElementById('card-number').value      = formatCardNumber(card.card_number || '', card.card_network);
+      document.getElementById('card-expiry').value      = card.expiry      || '';
+      document.getElementById('card-cvv').value         = card.cvv         || '';
+      document.getElementById('card-pin').value         = card.pin         || '';
+      selectCardTheme(card.color_theme || 'card-theme-black');
+    } else {
+      document.getElementById('bank-account-bank').value           = card.bank_name      || '';
+      document.getElementById('bank-account-type').value           = card.account_type   || 'savings';
+      document.getElementById('bank-account-holder').value         = card.card_holder    || '';
+      document.getElementById('bank-account-number').value         = card.account_number || '';
+      document.getElementById('bank-account-ifsc').value           = card.ifsc           || '';
+      document.getElementById('bank-account-branch').value         = card.branch         || '';
+      document.getElementById('bank-account-upi').value            = card.upi_id         || '';
+      document.getElementById('bank-account-cif').value            = card.cif_no         || '';
+      document.getElementById('bank-account-netbanking-id').value  = card.netbanking_id  || '';
+    }
+    document.getElementById('card-notes').value = card.notes || '';
+  } else {
+    document.getElementById('modal-card-title').textContent = 'Add Payment Card';
+    document.getElementById('modal-card-delete')?.classList.add('hidden');
+
+    // Reset card fields
+    document.getElementById('card-bank-name').value   = '';
+    document.getElementById('card-type-select').value = 'credit';
+    document.getElementById('card-holder-name').value = '';
+    document.getElementById('card-number').value      = '';
+    document.getElementById('card-expiry').value      = '';
+    document.getElementById('card-cvv').value         = '';
+    document.getElementById('card-pin').value         = '';
+
+    // Reset bank fields
+    document.getElementById('bank-account-bank').value          = '';
+    document.getElementById('bank-account-type').value          = 'savings';
+    document.getElementById('bank-account-holder').value        = '';
+    document.getElementById('bank-account-number').value        = '';
+    document.getElementById('bank-account-ifsc').value          = '';
+    document.getElementById('bank-account-branch').value        = '';
+    document.getElementById('bank-account-upi').value           = '';
+    document.getElementById('bank-account-cif').value           = '';
+    document.getElementById('bank-account-netbanking-id').value = '';
+
+    document.getElementById('card-notes').value = '';
+    selectCardTheme('card-theme-black');
+  }
+
+  updateLiveCardPreview();
+  showModal('modal-card');
+}
+
+async function saveCard() {
+  const mode = state.cardMode;
+  const now = new Date().toISOString();
+
+  if (!state.vault.cards) state.vault.cards = [];
+
+  let cardObj = null;
+
+  if (mode === 'card') {
+    const bankName   = document.getElementById('card-bank-name').value.trim();
+    const cardType   = document.getElementById('card-type-select').value;
+    const cardHolder = document.getElementById('card-holder-name').value.trim();
+    const rawNumber  = document.getElementById('card-number').value.replace(/\D/g, '');
+    const expiry     = document.getElementById('card-expiry').value.trim();
+    const cvv        = document.getElementById('card-cvv').value.trim();
+    const pin        = document.getElementById('card-pin').value.trim();
+    const notes      = document.getElementById('card-notes').value.trim();
+
+    if (!bankName || !cardHolder || !rawNumber) {
+      Toast.error('Please enter the bank name, cardholder name, and card number.');
+      return;
+    }
+
+    const network = detectCardNetwork(rawNumber);
+
+    cardObj = {
+      type: 'card',
+      bank_name: bankName,
+      card_type: cardType,
+      card_holder: cardHolder,
+      card_number: rawNumber,
+      card_network: network,
+      expiry,
+      cvv,
+      pin,
+      color_theme: state.selectedCardTheme || 'card-theme-black',
+      notes,
+    };
+  } else {
+    const bankName      = document.getElementById('bank-account-bank').value.trim();
+    const accountType   = document.getElementById('bank-account-type').value;
+    const holder        = document.getElementById('bank-account-holder').value.trim();
+    const accountNumber = document.getElementById('bank-account-number').value.trim();
+    const ifsc          = document.getElementById('bank-account-ifsc').value.trim().toUpperCase();
+    const branch        = document.getElementById('bank-account-branch').value.trim();
+    const upiId         = document.getElementById('bank-account-upi').value.trim();
+    const cifNo         = document.getElementById('bank-account-cif').value.trim();
+    const netbankingId  = document.getElementById('bank-account-netbanking-id').value.trim();
+    const notes         = document.getElementById('card-notes').value.trim();
+
+    if (!bankName || !accountNumber) {
+      Toast.error('Please enter the bank name and account number.');
+      return;
+    }
+
+    cardObj = {
+      type: 'bank',
+      bank_name: bankName,
+      account_type: accountType,
+      card_holder: holder,
+      account_number: accountNumber,
+      ifsc,
+      branch,
+      upi_id: upiId,
+      cif_no: cifNo,
+      netbanking_id: netbankingId,
+      notes,
+    };
+  }
+
+  if (state.editingCardId) {
+    const idx = state.vault.cards.findIndex(c => c.id === state.editingCardId);
+    if (idx !== -1) {
+      state.vault.cards[idx] = {
+        ...state.vault.cards[idx],
+        ...cardObj,
+        updated_at: now,
+      };
+    }
+  } else {
+    state.vault.cards.push({
+      id: uuid(),
+      ...cardObj,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+
+  hideModal('modal-card');
+  renderCardsList();
+  Toast.success(mode === 'card' ? 'Card saved securely.' : 'Bank account saved securely.');
+  await saveVault();
+}
+
+async function deleteCard() {
+  if (!state.editingCardId) return;
+  if (!confirm('Delete this card / bank account? This cannot be undone.')) return;
+
+  state.vault.cards = (state.vault.cards || []).filter(c => c.id !== state.editingCardId);
+  hideModal('modal-card');
+  renderCardsList();
+  Toast.success('Item deleted.');
+  await saveVault();
+}
+
+function renderCardsList() {
+  const container = document.getElementById('cards-grid');
+  if (!container) return;
+
+  const q = (state.cardsSearchQuery || '').toLowerCase().trim();
+  const filter = state.cardCategoryFilter || 'all';
+  const allCards = state.vault?.cards || [];
+
+  const filtered = allCards.filter(c => {
+    // Category filter
+    if (filter === 'credit' && (c.type !== 'card' || c.card_type !== 'credit')) return false;
+    if (filter === 'debit' && (c.type !== 'card' || c.card_type !== 'debit')) return false;
+    if (filter === 'bank' && c.type !== 'bank') return false;
+
+    // Search query
+    if (q) {
+      const matchBank   = (c.bank_name || '').toLowerCase().includes(q);
+      const matchHolder = (c.card_holder || '').toLowerCase().includes(q);
+      const matchNum    = (c.card_number || c.account_number || '').includes(q);
+      const matchUpi    = (c.upi_id || '').toLowerCase().includes(q);
+      const matchIfsc   = (c.ifsc || '').toLowerCase().includes(q);
+      return matchBank || matchHolder || matchNum || matchUpi || matchIfsc;
+    }
+    return true;
+  });
+
+  const sorted = [...filtered].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+
+  const countBadge = document.getElementById('cards-count-badge');
+  if (countBadge) {
+    const total = allCards.length;
+    countBadge.textContent = q || filter !== 'all' ? `${sorted.length} of ${total}` : `${total} item${total !== 1 ? 's' : ''}`;
+  }
+  updateNavBadges();
+
+  if (sorted.length === 0) {
+    container.innerHTML = `
+      <div class="vault-empty" style="grid-column: 1 / -1;">
+        <div class="vault-empty-icon">
+          <svg width="36" height="36" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity=".3">
+            <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
+            <path d="M1.5 6.5h13M4 10.5h2.5"/>
+          </svg>
+        </div>
+        <h3>${q ? `No cards match "${escapeHtml(q)}"` : 'No cards or bank accounts added'}</h3>
+        <p>${q ? 'Try a different search.' : 'Press + to securely store credit cards, debit cards, or bank details.'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+
+  sorted.forEach(item => {
+    if (item.type === 'bank') {
+      const cardEl = document.createElement('div');
+      cardEl.className = 'bank-account-card';
+      cardEl.dataset.id = item.id;
+
+      const maskedAcc = item.account_number ? (item.account_number.length > 4 ? `•••• •••• ${item.account_number.slice(-4)}` : item.account_number) : '—';
+      const upiDisplay = item.upi_id ? `<div class="bank-detail-item"><span class="bank-detail-label">UPI ID</span><div class="bank-detail-value-row"><span>${escapeHtml(item.upi_id)}</span><button type="button" class="bank-detail-copy-btn" data-copy="${escapeHtml(item.upi_id)}" data-label="UPI ID" title="Copy UPI ID"><svg class="ic ic-sm"><use href="#ic-copy"/></svg></button></div></div>` : '';
+      const branchDisplay = item.branch ? `<div class="bank-detail-item"><span class="bank-detail-label">Branch</span><span class="bank-detail-value-row">${escapeHtml(item.branch)}</span></div>` : '';
+
+      cardEl.innerHTML = `
+        <div class="bank-card-header">
+          <div class="bank-card-title-group">
+            <div class="bank-card-icon">
+              <svg class="ic"><use href="#ic-bank"/></svg>
+            </div>
+            <div>
+              <div class="bank-card-name">${escapeHtml(item.bank_name || 'Bank Account')}</div>
+              <div style="font-size:11px;color:var(--t3);">${escapeHtml(item.card_holder || '')}</div>
+            </div>
+          </div>
+          <span class="bank-card-type-badge">${escapeHtml(item.account_type || 'Savings')}</span>
+        </div>
+
+        <div class="bank-card-details-grid">
+          <div class="bank-detail-item">
+            <span class="bank-detail-label">Account No.</span>
+            <div class="bank-detail-value-row">
+              <span id="bank-acc-display-${item.id}">${maskedAcc}</span>
+              <button type="button" class="bank-detail-copy-btn" data-copy="${escapeHtml(item.account_number)}" data-label="Account Number" title="Copy Account No."><svg class="ic ic-sm"><use href="#ic-copy"/></svg></button>
+            </div>
+          </div>
+          <div class="bank-detail-item">
+            <span class="bank-detail-label">IFSC Code</span>
+            <div class="bank-detail-value-row">
+              <span>${escapeHtml(item.ifsc || '—')}</span>
+              ${item.ifsc ? `<button type="button" class="bank-detail-copy-btn" data-copy="${escapeHtml(item.ifsc)}" data-label="IFSC Code" title="Copy IFSC"><svg class="ic ic-sm"><use href="#ic-copy"/></svg></button>` : ''}
+            </div>
+          </div>
+          ${upiDisplay}
+          ${branchDisplay}
+        </div>
+
+        <div class="card-quick-actions">
+          <div class="card-action-btn-group">
+            <button type="button" class="card-action-chip" data-copy="${escapeHtml(item.account_number)}" data-label="Account Number">
+              <svg class="ic ic-sm"><use href="#ic-copy"/></svg>
+              <span>Copy A/C</span>
+            </button>
+            ${item.ifsc ? `
+              <button type="button" class="card-action-chip" data-copy="${escapeHtml(item.ifsc)}" data-label="IFSC Code">
+                <svg class="ic ic-sm"><use href="#ic-copy"/></svg>
+                <span>Copy IFSC</span>
+              </button>
+            ` : ''}
+          </div>
+          <button type="button" class="btn-icon" data-action="edit" data-id="${item.id}" title="Edit" aria-label="Edit">
+            <svg class="ic"><use href="#ic-edit"/></svg>
+          </button>
+        </div>
+      `;
+
+      cardEl.addEventListener('click', e => {
+        if (e.target.closest('[data-copy]') || e.target.closest('[data-action]')) return;
+        openCardModal(item.id);
+      });
+
+      container.appendChild(cardEl);
+
+    } else {
+      const cardWrapper = document.createElement('div');
+      cardWrapper.className = 'card-item-wrapper';
+      cardWrapper.dataset.id = item.id;
+
+      const network = item.card_network || detectCardNetwork(item.card_number);
+      const netDisplay = network === 'mastercard' ? 'Mastercard' : (network === 'rupay' ? 'RuPay' : (network === 'amex' ? 'AMEX' : (network === 'discover' ? 'Discover' : 'VISA')));
+      const masked = maskCardNumber(item.card_number);
+      const formattedFull = formatCardNumber(item.card_number, network);
+      const themeClass = item.color_theme || 'card-theme-black';
+
+      cardWrapper.innerHTML = `
+        <div class="digital-card ${themeClass}" id="card-view-${item.id}">
+          <div class="card-top-row">
+            <span class="card-preview-bank">${escapeHtml(item.bank_name || 'CARD')}</span>
+            <span class="card-preview-badge">${escapeHtml((item.card_type || 'credit').toUpperCase())}</span>
+          </div>
+          <div class="card-chip-row">
+            <div class="card-emv-chip">
+              <div class="chip-line horizontal"></div>
+              <div class="chip-line vertical"></div>
+            </div>
+            <div class="card-contactless-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8.5 16.5a5 5 0 0 1 0-9"/><path d="M12 19a8.5 8.5 0 0 0 0-14"/><path d="M15.5 21.5a12 12 0 0 0 0-19"/></svg>
+            </div>
+          </div>
+          <div class="card-preview-number" id="card-num-text-${item.id}" data-masked="${masked}" data-full="${formattedFull}">${masked}</div>
+          <div class="card-bottom-row">
+            <div class="card-preview-meta">
+              <span class="card-meta-label">CARDHOLDER</span>
+              <span class="card-meta-val">${escapeHtml((item.card_holder || 'YOUR NAME').toUpperCase())}</span>
+            </div>
+            <div class="card-preview-meta">
+              <span class="card-meta-label">EXPIRES</span>
+              <span class="card-meta-val">${escapeHtml(item.expiry || '••/••')}</span>
+            </div>
+            <div class="card-network-logo">${netDisplay}</div>
+          </div>
+        </div>
+
+        <div class="card-quick-actions">
+          <div class="card-action-btn-group">
+            <button type="button" class="card-action-chip" data-copy="${escapeHtml(item.card_number)}" data-label="Card Number" title="Copy Card Number">
+              <svg class="ic ic-sm"><use href="#ic-copy"/></svg>
+              <span>Copy No.</span>
+            </button>
+            ${item.cvv ? `
+              <button type="button" class="card-action-chip" data-copy="${escapeHtml(item.cvv)}" data-label="CVV" title="Copy CVV">
+                <svg class="ic ic-sm"><use href="#ic-shield-check"/></svg>
+                <span>CVV •••</span>
+              </button>
+            ` : ''}
+            <button type="button" class="card-action-chip" data-action="toggle-number" data-id="${item.id}" title="Toggle full number">
+              <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+              <span>Reveal</span>
+            </button>
+          </div>
+          <button type="button" class="btn-icon" data-action="edit" data-id="${item.id}" title="Edit" aria-label="Edit">
+            <svg class="ic"><use href="#ic-edit"/></svg>
+          </button>
+        </div>
+      `;
+
+      cardWrapper.addEventListener('click', e => {
+        if (e.target.closest('[data-copy]') || e.target.closest('[data-action]')) return;
+        openCardModal(item.id);
+      });
+
+      container.appendChild(cardWrapper);
+    }
+  });
+
+  container.querySelectorAll('[data-copy]').forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      const val = btn.dataset.copy;
+      const label = btn.dataset.label || 'Value';
+      if (!val) return;
+      await Clipboard.copy(val, `${label} copied to clipboard!`);
+    });
+  });
+
+  container.querySelectorAll('[data-action="toggle-number"]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      const numEl = document.getElementById(`card-num-text-${id}`);
+      if (!numEl) return;
+      const isFull = numEl.textContent === numEl.dataset.full;
+      numEl.textContent = isFull ? numEl.dataset.masked : numEl.dataset.full;
+      btn.querySelector('span').textContent = isFull ? 'Reveal' : 'Hide';
+    });
+  });
+
+  container.querySelectorAll('[data-action="edit"]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      openCardModal(btn.dataset.id);
+    });
+  });
+}
+
 // ─── GitHub Save ──────────────────────────────────────────────────────────────
 
 async function saveVault() {
@@ -2447,11 +3051,13 @@ function initEventListeners() {
     });
   });
   document.getElementById('tab-passwords-btn')?.addEventListener('click', () => switchVaultTab('passwords'));
-  document.getElementById('tab-journal-btn')?.addEventListener('click', () => switchVaultTab('journal'));
-  document.getElementById('tab-docs-btn')?.addEventListener('click', () => switchVaultTab('docs'));
+  document.getElementById('tab-cards-btn')?.addEventListener('click',     () => switchVaultTab('cards'));
+  document.getElementById('tab-docs-btn')?.addEventListener('click',      () => switchVaultTab('docs'));
+  document.getElementById('tab-journal-btn')?.addEventListener('click',   () => switchVaultTab('journal'));
   document.getElementById('bottom-tab-passwords')?.addEventListener('click', () => switchVaultTab('passwords'));
-  document.getElementById('bottom-tab-journal')?.addEventListener('click', () => switchVaultTab('journal'));
-  document.getElementById('bottom-tab-docs')?.addEventListener('click', () => switchVaultTab('docs'));
+  document.getElementById('bottom-tab-cards')?.addEventListener('click',     () => switchVaultTab('cards'));
+  document.getElementById('bottom-tab-docs')?.addEventListener('click',      () => switchVaultTab('docs'));
+  document.getElementById('bottom-tab-journal')?.addEventListener('click',   () => switchVaultTab('journal'));
 
   // ── Settings modal ────────────────────────────────────────────────────────
   document.getElementById('vault-settings-btn')?.addEventListener('click', openSettingsModal);
@@ -2477,6 +3083,8 @@ function initEventListeners() {
       openNoteEditor(null);
     } else if (state.activeTab === 'docs') {
       openDocModal(null);
+    } else if (state.activeTab === 'cards') {
+      openCardModal(null);
     } else {
       openAddModal();
     }
@@ -2487,6 +3095,8 @@ function initEventListeners() {
       openNoteEditor(null);
     } else if (state.activeTab === 'docs') {
       openDocModal(null);
+    } else if (state.activeTab === 'cards') {
+      openCardModal(null);
     } else {
       openAddModal();
     }
@@ -2498,6 +3108,59 @@ function initEventListeners() {
   document.getElementById('vault-search').addEventListener('input', e => {
     state.searchQuery = e.target.value;
     renderVaultList();
+  });
+
+  // ── Cards Search & Filter ─────────────────────────────────────────────────
+  document.getElementById('cards-search')?.addEventListener('input', e => {
+    state.cardsSearchQuery = e.target.value;
+    renderCardsList();
+  });
+
+  document.querySelectorAll('#cards-category-pills .journal-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#cards-category-pills .journal-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      state.cardCategoryFilter = pill.dataset.cardFilter || 'all';
+      renderCardsList();
+    });
+  });
+
+  // ── Card / Bank Modal ─────────────────────────────────────────────────────
+  document.getElementById('modal-card-close')?.addEventListener('click',  () => hideModal('modal-card'));
+  document.getElementById('modal-card-cancel')?.addEventListener('click', () => hideModal('modal-card'));
+  document.getElementById('modal-card-save')?.addEventListener('click',   saveCard);
+  document.getElementById('modal-card-delete')?.addEventListener('click', deleteCard);
+
+  document.getElementById('btn-toggle-type-card')?.addEventListener('click', () => setCardModalMode('card'));
+  document.getElementById('btn-toggle-type-bank')?.addEventListener('click', () => setCardModalMode('bank'));
+
+  document.querySelectorAll('#bank-preset-chips .doc-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => applyBankPreset(btn.dataset.bankPreset));
+  });
+
+  document.querySelectorAll('#card-theme-palette .theme-swatch').forEach(sw => {
+    sw.addEventListener('click', () => selectCardTheme(sw.dataset.theme));
+  });
+
+  document.getElementById('card-number')?.addEventListener('input', e => {
+    const raw = e.target.value.replace(/\D/g, '');
+    const net = detectCardNetwork(raw);
+    e.target.value = formatCardNumber(raw, net);
+    updateLiveCardPreview();
+  });
+
+  document.getElementById('card-expiry')?.addEventListener('input', e => {
+    e.target.value = formatCardExpiry(e.target.value);
+    updateLiveCardPreview();
+  });
+
+  ['card-bank-name', 'card-holder-name', 'card-type-select'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', updateLiveCardPreview);
+    document.getElementById(id)?.addEventListener('change', updateLiveCardPreview);
+  });
+
+  document.getElementById('bank-account-ifsc')?.addEventListener('input', e => {
+    e.target.value = e.target.value.toUpperCase();
   });
 
   // ── Journal Screen & Filter ───────────────────────────────────────────────
