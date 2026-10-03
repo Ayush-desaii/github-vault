@@ -69,6 +69,16 @@
     <path d="M8 10V3M5 6l3-3 3 3"/>
     <path d="M3 11v1.5A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V11"/>
   </symbol>
+  <symbol id="ic-note" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 2.5A1.5 1.5 0 0 1 4.5 1h5.086a1.5 1.5 0 0 1 1.06.44l2.915 2.914a1.5 1.5 0 0 1 .439 1.06V13.5a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 3 13.5v-11z"/>
+    <path d="M10 1v3.5A1.5 1.5 0 0 0 11.5 6H14"/>
+  </symbol>
+  <symbol id="ic-arrow-left" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 8H3m4-4L3 8l4 4"/>
+  </symbol>
+  <symbol id="ic-trash" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2.5 4h11M5.5 4V2.5A1.5 1.5 0 0 1 7 1h2a1.5 1.5 0 0 1 1.5 1.5V4M12.5 4v9a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 3.5 13V4"/>
+  </symbol>
 </svg>
 
 <!-- helper: inline SVG icon -->
@@ -306,15 +316,15 @@
 <div id="screen-vault" class="screen">
 
   <header class="vault-header">
-    <div class="vault-title">
-      <span class="vault-icon">
-        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="7" width="10" height="8" rx="1.5"/>
-          <path d="M5 7V5a3 3 0 0 1 6 0v2"/>
-          <circle cx="8" cy="11.5" r=".8" fill="currentColor" stroke="none"/>
-        </svg>
-      </span>
-      Vault
+    <div class="vault-nav-tabs">
+      <button type="button" class="vault-nav-tab active" id="tab-passwords-btn">
+        <svg class="ic"><use href="#ic-key"/></svg>
+        <span>Passwords</span>
+      </button>
+      <button type="button" class="vault-nav-tab" id="tab-journal-btn">
+        <svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>
+        <span>Journal</span>
+      </button>
     </div>
     <div class="vault-actions">
       <button class="btn-icon" id="vault-add-btn" title="Add (A)">
@@ -335,20 +345,69 @@
   <!-- Hidden file input — triggered by the import button -->
   <input type="file" id="csv-file-input" accept=".csv,text/csv" style="display:none" />
 
-  <div class="vault-search-wrap">
-    <svg class="ic search-icon"><use href="#ic-search"/></svg>
-    <input type="search" id="vault-search" placeholder="Search passwords…" autocomplete="off" spellcheck="false" />
-    <span id="vault-count-badge" class="vault-count-badge">0 items</span>
+  <!-- ── Passwords View ──────────────────────────────────────── -->
+  <div id="vault-view-passwords" class="vault-tab-view">
+    <div class="vault-search-wrap">
+      <svg class="ic search-icon"><use href="#ic-search"/></svg>
+      <input type="search" id="vault-search" placeholder="Search passwords…" autocomplete="off" spellcheck="false" />
+      <span id="vault-count-badge" class="vault-count-badge">0 items</span>
+    </div>
+
+    <main id="vault-list" class="vault-list"></main>
   </div>
 
-  <main id="vault-list" class="vault-list"></main>
+  <!-- ── Journal / Mi Notes View ─────────────────────────────── -->
+  <div id="vault-view-journal" class="vault-tab-view hidden">
+    <div class="journal-search-wrap">
+      <div class="journal-filter-row">
+        <button type="button" class="journal-pill active" id="journal-pill-all">All</button>
+        <span id="journal-count-badge" class="journal-counter">0 notes</span>
+      </div>
+      <div class="journal-input-wrap">
+        <svg class="ic search-icon"><use href="#ic-search"/></svg>
+        <input type="search" id="journal-search" placeholder="Search journal & notes…" autocomplete="off" spellcheck="false" />
+      </div>
+    </div>
 
-  <!-- Mobile Floating Action Button -->
-  <button class="btn-fab" id="vault-fab-btn" title="Add Password" aria-label="Add Password">
+    <main id="journal-grid" class="journal-grid"></main>
+  </div>
+
+  <!-- Mobile Floating Action Button (dynamically styled/routed) -->
+  <button class="btn-fab" id="vault-fab-btn" title="Add" aria-label="Add">
     <svg class="ic-lg"><use href="#ic-plus"/></svg>
   </button>
 
   <div class="sync-status" id="sync-status"></div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     NOTE EDITOR (Mi Notes style full-screen editor)
+════════════════════════════════════════════════════════════════ -->
+<div id="screen-note-editor" class="screen">
+  <header class="note-editor-header">
+    <button type="button" class="btn-icon" id="note-back-btn" title="Back (saves note)" aria-label="Back">
+      <svg class="ic-lg"><use href="#ic-arrow-left"/></svg>
+    </button>
+    <div class="note-meta-info">
+      <span id="note-date-label">Today</span>
+      <span class="note-meta-sep">|</span>
+      <span id="note-char-count">0 characters</span>
+    </div>
+    <div class="note-header-actions">
+      <button type="button" class="btn-icon" id="note-delete-btn" title="Delete note" aria-label="Delete note" style="display:none">
+        <svg class="ic" style="color:var(--red)"><use href="#ic-trash"/></svg>
+      </button>
+      <button type="button" class="btn-icon" id="note-save-btn" title="Done" aria-label="Save and close">
+        <svg class="ic" style="color:var(--grn)"><use href="#ic-check"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="note-editor-body">
+    <input type="text" id="note-title-input" class="note-title-input" placeholder="Title" autocomplete="off" />
+    <textarea id="note-content-input" class="note-content-input" placeholder="Start typing…" spellcheck="true"></textarea>
+  </main>
 </div>
 
 

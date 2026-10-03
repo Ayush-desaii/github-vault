@@ -53,6 +53,15 @@ const state = {
 
   // Search filter string
   searchQuery: '',
+
+  // Active vault tab ('passwords' | 'journal')
+  activeTab: 'passwords',
+
+  // Currently editing journal note id (null = creating new)
+  editingNoteId: null,
+
+  // Journal search filter string
+  journalSearchQuery: '',
 };
 
 // ─── Screen Management ────────────────────────────────────────────────────────
@@ -505,6 +514,7 @@ function initSetupWizard() {
         saveConfig(config);
 
         state.vault     = data;
+        if (state.vault && !state.vault.notes) state.vault.notes = [];
         state.vaultKey  = key;
         state.vaultSalt = salt;
         state.vaultBlob = blob;
@@ -529,6 +539,7 @@ function initSetupWizard() {
         version: 1,
         github_pat: pat,
         entries:    [],
+        notes:      [],
         created_at: new Date().toISOString(),
       };
 
@@ -584,7 +595,11 @@ function initSetupWizard() {
 
   document.getElementById('setup-done-btn').addEventListener('click', () => {
     showScreen('vault');
-    renderVaultList();
+    if (state.activeTab === 'journal') {
+      renderJournalList();
+    } else {
+      renderVaultList();
+    }
   });
 }
 
@@ -759,6 +774,7 @@ async function handleFullUnlock(quickType) {
     const { data, key, salt } = await Crypto.decryptVault(state.vaultBlob, masterSecret);
 
     state.vault     = data;
+    if (state.vault && !state.vault.notes) state.vault.notes = [];
     state.vaultKey  = key;
     state.vaultSalt = salt;
     state.vaultSha  = sessionGet('vault_sha');
@@ -773,7 +789,11 @@ async function handleFullUnlock(quickType) {
     await cacheKeyForQuickUnlock(key, quickSecret);
 
     showScreen('vault');
-    renderVaultList();
+    if (state.activeTab === 'journal') {
+      renderJournalList();
+    } else {
+      renderVaultList();
+    }
 
   } catch (err) {
     const msg = err.message === 'DECRYPT_FAILED'
@@ -819,13 +839,18 @@ async function handleQuickUnlock(quickSecret) {
     const data  = JSON.parse(new TextDecoder().decode(ptBuf));
 
     state.vault     = data;
+    if (state.vault && !state.vault.notes) state.vault.notes = [];
     state.vaultKey  = key;
     state.vaultSalt = salt;
     state.vaultBlob = blob;
     state.vaultSha  = sessionGet('vault_sha');
 
     showScreen('vault');
-    renderVaultList();
+    if (state.activeTab === 'journal') {
+      renderJournalList();
+    } else {
+      renderVaultList();
+    }
 
   } catch {
     showErr(errEl, 'Wrong PIN/pattern. Try again.');
@@ -1080,6 +1105,224 @@ async function deleteEntry() {
   await saveVault();
 }
 
+// ─── Journal & Notes (Mi Notes style) ─────────────────────────────────────────
+
+function switchVaultTab(tab) {
+  state.activeTab = tab;
+  const pwTabBtn  = document.getElementById('tab-passwords-btn');
+  const jrnTabBtn = document.getElementById('tab-journal-btn');
+  const pwView    = document.getElementById('vault-view-passwords');
+  const jrnView   = document.getElementById('vault-view-journal');
+  const fab       = document.getElementById('vault-fab-btn');
+
+  if (tab === 'journal') {
+    pwTabBtn?.classList.remove('active');
+    jrnTabBtn?.classList.add('active');
+    pwView?.classList.add('hidden');
+    jrnView?.classList.remove('hidden');
+    fab?.classList.add('fab-journal');
+    renderJournalList();
+  } else {
+    jrnTabBtn?.classList.remove('active');
+    pwTabBtn?.classList.add('active');
+    jrnView?.classList.add('hidden');
+    pwView?.classList.remove('hidden');
+    fab?.classList.remove('fab-journal');
+    renderVaultList();
+  }
+}
+
+function formatJournalCardDate(isoString) {
+  if (!isoString) return '';
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const isSameYear = d.getFullYear() === now.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  if (isSameYear) {
+    return `${month}/${day}`;
+  } else {
+    return `${month}/${day}/${d.getFullYear()}`;
+  }
+}
+
+function formatNoteEditorDate(isoString) {
+  const d = isoString ? new Date(isoString) : new Date();
+  if (isNaN(d.getTime())) return 'Today';
+  const opts = { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true };
+  return d.toLocaleDateString(undefined, opts);
+}
+
+function updateNoteCharCount() {
+  const title = document.getElementById('note-title-input')?.value || '';
+  const content = document.getElementById('note-content-input')?.value || '';
+  const total = (title + content).length;
+  const countEl = document.getElementById('note-char-count');
+  if (countEl) {
+    countEl.textContent = `${total} character${total === 1 ? '' : 's'}`;
+  }
+}
+
+function renderJournalList() {
+  const container = document.getElementById('journal-grid');
+  if (!container) return;
+  const q = (state.journalSearchQuery || '').toLowerCase().trim();
+  const notes = state.vault?.notes || [];
+
+  const filtered = q
+    ? notes.filter(n =>
+        (n.title || '').toLowerCase().includes(q) ||
+        (n.content || '').toLowerCase().includes(q)
+      )
+    : notes;
+
+  // Sort: most recently updated first
+  const sorted = [...filtered].sort((a, b) =>
+    new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
+  );
+
+  // Update count badge
+  const countBadge = document.getElementById('journal-count-badge');
+  if (countBadge) {
+    const total = notes.length;
+    const shown = sorted.length;
+    countBadge.textContent = q ? `${shown} of ${total}` : `${total} note${total !== 1 ? 's' : ''}`;
+  }
+
+  if (sorted.length === 0) {
+    container.innerHTML = `
+      <div class="journal-empty">
+        <div class="vault-empty-icon">
+          <svg width="32" height="32" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity=".3">
+            <path d="M12 2H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z"/>
+            <path d="M6 5h4M6 8h4M6 11h2"/>
+          </svg>
+        </div>
+        <h3>${q ? `No notes for "${escapeHtml(q)}"` : 'No notes yet'}</h3>
+        <p>${q ? 'Try a different search.' : 'Tap + to write your first journal entry.'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+
+  sorted.forEach(note => {
+    const card = document.createElement('div');
+    card.className = 'journal-card';
+    card.dataset.id = note.id;
+
+    const titleHtml = note.title
+      ? `<div class="journal-card-title">${escapeHtml(note.title)}</div>`
+      : '';
+    const previewHtml = note.content
+      ? `<div class="journal-card-preview">${escapeHtml(note.content)}</div>`
+      : '';
+    const dateStr = formatJournalCardDate(note.updated_at || note.created_at);
+
+    card.innerHTML = `
+      ${titleHtml}
+      ${previewHtml}
+      <div class="journal-card-date">${dateStr}</div>
+    `;
+
+    card.addEventListener('click', () => {
+      openNoteEditor(note.id);
+    });
+
+    container.appendChild(card);
+  });
+}
+
+function openNoteEditor(noteId) {
+  state.editingNoteId = noteId;
+  const titleInput = document.getElementById('note-title-input');
+  const contentInput = document.getElementById('note-content-input');
+  const dateLabel = document.getElementById('note-date-label');
+  const deleteBtn = document.getElementById('note-delete-btn');
+
+  if (noteId) {
+    const note = state.vault?.notes?.find(n => n.id === noteId);
+    if (!note) return;
+    titleInput.value = note.title || '';
+    contentInput.value = note.content || '';
+    dateLabel.textContent = formatNoteEditorDate(note.updated_at || note.created_at);
+    if (deleteBtn) deleteBtn.style.display = 'inline-flex';
+  } else {
+    titleInput.value = '';
+    contentInput.value = '';
+    dateLabel.textContent = formatNoteEditorDate(new Date().toISOString());
+    if (deleteBtn) deleteBtn.style.display = 'none';
+  }
+
+  updateNoteCharCount();
+  showScreen('note-editor');
+  if (!noteId) {
+    titleInput.focus();
+  }
+}
+
+async function saveCurrentNote() {
+  const title = (document.getElementById('note-title-input')?.value || '').trim();
+  const content = (document.getElementById('note-content-input')?.value || '');
+  const hasContent = title.length > 0 || content.trim().length > 0;
+  const now = new Date().toISOString();
+
+  if (!state.vault) return;
+  if (!state.vault.notes) state.vault.notes = [];
+
+  let changed = false;
+
+  if (state.editingNoteId) {
+    const idx = state.vault.notes.findIndex(n => n.id === state.editingNoteId);
+    if (idx !== -1) {
+      const existing = state.vault.notes[idx];
+      if (existing.title !== title || existing.content !== content) {
+        state.vault.notes[idx] = {
+          ...existing,
+          title,
+          content,
+          updated_at: now,
+        };
+        changed = true;
+      }
+    }
+  } else if (hasContent) {
+    state.vault.notes.push({
+      id: uuid(),
+      title,
+      content,
+      created_at: now,
+      updated_at: now,
+    });
+    changed = true;
+  }
+
+  state.editingNoteId = null;
+  showScreen('vault');
+  renderJournalList();
+
+  if (changed) {
+    await saveVault();
+  }
+}
+
+async function deleteCurrentNote() {
+  if (!state.editingNoteId) return;
+  if (!confirm('Delete this note? This cannot be undone.')) return;
+
+  if (state.vault?.notes) {
+    state.vault.notes = state.vault.notes.filter(n => n.id !== state.editingNoteId);
+  }
+
+  state.editingNoteId = null;
+  showScreen('vault');
+  renderJournalList();
+  await saveVault();
+  Toast.success('Note deleted.');
+}
+
 // ─── GitHub Save ──────────────────────────────────────────────────────────────
 
 async function saveVault() {
@@ -1143,9 +1386,27 @@ function regeneratePassword() {
 
 function initEventListeners() {
 
+  // ── Navigation Tabs ───────────────────────────────────────────────────────
+  document.getElementById('tab-passwords-btn')?.addEventListener('click', () => switchVaultTab('passwords'));
+  document.getElementById('tab-journal-btn')?.addEventListener('click', () => switchVaultTab('journal'));
+
   // ── Vault screen ──────────────────────────────────────────────────────────
-  document.getElementById('vault-add-btn')?.addEventListener('click', openAddModal);
-  document.getElementById('vault-fab-btn')?.addEventListener('click', openAddModal);
+  document.getElementById('vault-add-btn')?.addEventListener('click', () => {
+    if (state.activeTab === 'journal') {
+      openNoteEditor(null);
+    } else {
+      openAddModal();
+    }
+  });
+
+  document.getElementById('vault-fab-btn')?.addEventListener('click', () => {
+    if (state.activeTab === 'journal') {
+      openNoteEditor(null);
+    } else {
+      openAddModal();
+    }
+  });
+
   document.getElementById('vault-gen-btn')?.addEventListener('click', openGeneratorModal);
   document.getElementById('vault-lock-btn')?.addEventListener('click', lockVault);
 
@@ -1153,6 +1414,27 @@ function initEventListeners() {
     state.searchQuery = e.target.value;
     renderVaultList();
   });
+
+  // ── Journal Screen & Filter ───────────────────────────────────────────────
+  document.getElementById('journal-search')?.addEventListener('input', e => {
+    state.journalSearchQuery = e.target.value;
+    renderJournalList();
+  });
+
+  document.getElementById('journal-pill-all')?.addEventListener('click', () => {
+    const input = document.getElementById('journal-search');
+    if (input) input.value = '';
+    state.journalSearchQuery = '';
+    renderJournalList();
+  });
+
+  // ── Note Editor ───────────────────────────────────────────────────────────
+  document.getElementById('note-back-btn')?.addEventListener('click', saveCurrentNote);
+  document.getElementById('note-save-btn')?.addEventListener('click', saveCurrentNote);
+  document.getElementById('note-delete-btn')?.addEventListener('click', deleteCurrentNote);
+
+  document.getElementById('note-title-input')?.addEventListener('input', updateNoteCharCount);
+  document.getElementById('note-content-input')?.addEventListener('input', updateNoteCharCount);
 
   // ── Entry modal ───────────────────────────────────────────────────────────
   document.getElementById('modal-entry-close').addEventListener('click',  () => hideModal('modal-entry'));
@@ -1210,20 +1492,32 @@ function initEventListeners() {
 
 function initKeyboardShortcuts() {
   document.addEventListener('keydown', e => {
-    if (state.screen !== 'vault') return;
+    if (state.screen !== 'vault' && state.screen !== 'note-editor') return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-    switch (e.key.toLowerCase()) {
-      case 'a': openAddModal();                                      break;
-      case 'g': openGeneratorModal();                                break;
-      case 'i': document.getElementById('csv-file-input').click();  break;
-      case 'l': lockVault();                                         break;
+    if (state.screen === 'vault') {
+      switch (e.key.toLowerCase()) {
+        case 'a':
+          if (state.activeTab === 'journal') {
+            openNoteEditor(null);
+          } else {
+            openAddModal();
+          }
+          break;
+        case 'g': openGeneratorModal();                                break;
+        case 'i': document.getElementById('csv-file-input').click();  break;
+        case 'l': lockVault();                                         break;
+      }
     }
   });
 
-  // Close modals with Escape
+  // Close modals or save/exit note editor with Escape
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
+      if (state.screen === 'note-editor') {
+        saveCurrentNote();
+        return;
+      }
       ['modal-entry', 'modal-generator', 'modal-import'].forEach(id => {
         const m = document.getElementById(id);
         if (m && m.classList.contains('visible')) hideModal(id);
@@ -1234,9 +1528,14 @@ function initKeyboardShortcuts() {
 
 // ─── Auto-Lock on Tab Hidden ──────────────────────────────────────────────────
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden && state.screen === 'vault') {
-    lockVault();
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden) {
+    if (state.screen === 'note-editor') {
+      await saveCurrentNote();
+    }
+    if (state.screen === 'vault' || state.screen === 'note-editor') {
+      lockVault();
+    }
   }
 });
 
