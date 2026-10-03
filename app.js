@@ -72,6 +72,12 @@ const state = {
   // Docs category filter ('all' | 'identity' | 'signature' | 'other')
   docCategoryFilter: 'all',
 
+  // Stable doc ID during creation
+  currentDocId: null,
+
+  // Flag to prevent auto-lock when system file picker or camera dialog is active
+  isPickingFile: false,
+
   // Temporary list of attached files in doc modal
   currentDocDraftFiles: [],
 };
@@ -885,6 +891,11 @@ async function cacheKeyForQuickUnlock(key, quickSecret) {
 // ─── Lock Vault ───────────────────────────────────────────────────────────────
 
 function lockVault() {
+  // Hide all modals so orphaned dialogs don't stay visible on locked screen
+  ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer'].forEach(id => {
+    hideModal(id);
+  });
+
   // Clear sensitive state from memory
   state.vault     = null;
   state.vaultKey  = null;
@@ -1552,6 +1563,7 @@ async function copyDocNumber(docId, btnElement = null) {
 
 function openDocModal(docId) {
   state.editingDocId = docId;
+  state.currentDocId = docId || uuid();
   const doc = docId ? state.vault?.docs?.find(d => d.id === docId) : null;
 
   document.getElementById('modal-doc-title').textContent = doc ? 'Edit Document' : 'Add Document';
@@ -1606,7 +1618,7 @@ function renderDocDraftFiles() {
   if (state.currentDocDraftFiles.length === 0) {
     container.innerHTML = `
       <div style="padding:12px;text-align:center;border:1px dashed var(--line2);border-radius:var(--r-sm);color:var(--t3);font-size:12px">
-        No files attached yet. Tap "Add File / Photo / PDF" above.
+        No files attached yet. Tap "Add File / Doc / PDF" above.
       </div>
     `;
     return;
@@ -1664,7 +1676,8 @@ function renderDocDraftFiles() {
 async function handleDocFilesSelected(fileList) {
   if (!fileList || fileList.length === 0) return;
 
-  const docId = state.editingDocId || uuid();
+  const docId = state.editingDocId || state.currentDocId || uuid();
+  state.currentDocId = docId;
 
   for (let i = 0; i < fileList.length; i++) {
     const file = fileList[i];
@@ -1689,6 +1702,13 @@ async function handleDocFilesSelected(fileList) {
 }
 
 async function saveDoc() {
+  if (!state.vaultKey || !state.vault) {
+    Toast.error('Vault session is locked. Please unlock again to save.');
+    hideModal('modal-doc');
+    lockVault();
+    return;
+  }
+
   const name        = document.getElementById('doc-name').value.trim();
   const category    = document.getElementById('doc-category').value;
   const number      = document.getElementById('doc-number').value.trim();
@@ -1707,7 +1727,7 @@ async function saveDoc() {
 
   try {
     const now = new Date().toISOString();
-    const docId = state.editingDocId || uuid();
+    const docId = state.editingDocId || state.currentDocId || uuid();
 
     // 1. Commit any new attached files to GitHub under docs/
     const finalFiles = [];
@@ -1858,6 +1878,10 @@ async function viewDocFile(docId, fileId) {
   showModal('modal-doc-viewer');
 
   try {
+    if (!state.vaultKey) {
+      throw new Error('Vault is locked. Please unlock your vault first.');
+    }
+
     let blobUrl = _decryptedDocCache[file.file_path];
 
     if (!blobUrl) {
@@ -1877,17 +1901,36 @@ async function viewDocFile(docId, fileId) {
 
     spinner.style.display = 'none';
 
-    const isPdf = (file.file_type || '').includes('pdf') || (file.file_name || '').endsWith('.pdf');
+    const isPdf   = (file.file_type || '').includes('pdf') || (file.file_name || '').toLowerCase().endsWith('.pdf');
+    const isImage = (file.file_type || '').startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|svg)$/i.test(file.file_name || '');
+
     if (isPdf) {
       container.innerHTML = `
         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;height:100%;width:100%">
           <iframe src="${blobUrl}" style="width:100%;height:100%;border:none;border-radius:var(--r)"></iframe>
         </div>
       `;
-    } else {
+    } else if (isImage) {
       container.innerHTML = `
         <img src="${blobUrl}" alt="${escapeHtml(file.file_name)}" />
       `;
+    } else {
+      // Word (.docx, .doc), text, or other document format
+      container.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:30px 16px;">
+          <div style="font-size:52px;">📄</div>
+          <div style="font-size:17px;font-weight:600;color:var(--w);">${escapeHtml(file.file_name)}</div>
+          <div style="font-size:12px;color:var(--t2);">${formatBytes(file.file_size)} • Decrypted document</div>
+          <p class="hint" style="max-width:340px;font-size:12.5px;">This file is decrypted and ready to open in Microsoft Word, Google Docs, or your office app.</p>
+          <button type="button" class="btn-primary" id="viewer-doc-direct-dl-btn" style="margin-top:8px;">
+            <svg class="ic ic-sm"><use href="#ic-download"/></svg>
+            <span>Download Decrypted File</span>
+          </button>
+        </div>
+      `;
+      document.getElementById('viewer-doc-direct-dl-btn')?.addEventListener('click', () => {
+        document.getElementById('viewer-download-btn')?.click();
+      });
     }
 
     // Set download button
@@ -2047,14 +2090,20 @@ function initEventListeners() {
   });
 
   document.getElementById('doc-add-file-btn')?.addEventListener('click', () => {
+    state.isPickingFile = true;
     document.getElementById('doc-file-input')?.click();
   });
 
   document.getElementById('doc-file-input')?.addEventListener('change', async e => {
+    state.isPickingFile = false;
     if (e.target.files?.length) {
       await handleDocFilesSelected(e.target.files);
       e.target.value = '';
     }
+  });
+
+  document.getElementById('doc-file-input')?.addEventListener('cancel', () => {
+    state.isPickingFile = false;
   });
 
   // ── Document Viewer Modal ─────────────────────────────────────────────────
@@ -2100,10 +2149,12 @@ function initEventListeners() {
   // ── Import ────────────────────────────────────────────────────────────────
   // Clicking the import button opens the OS file picker (no file ever uploads)
   document.getElementById('vault-import-btn').addEventListener('click', () => {
+    state.isPickingFile = true;
     document.getElementById('csv-file-input').click();
   });
 
   document.getElementById('csv-file-input').addEventListener('change', async e => {
+    state.isPickingFile = false;
     const file = e.target.files?.[0];
     if (!file) return;
     try {
@@ -2112,6 +2163,10 @@ function initEventListeners() {
       // Always clear the input so the same file can be re-selected if needed
       e.target.value = '';
     }
+  });
+
+  document.getElementById('csv-file-input')?.addEventListener('cancel', () => {
+    state.isPickingFile = false;
   });
 
   // ── Import modal ──────────────────────────────────────────────────────────
@@ -2163,6 +2218,10 @@ function initKeyboardShortcuts() {
 // ─── Auto-Lock on Tab Hidden ──────────────────────────────────────────────────
 
 document.addEventListener('visibilitychange', async () => {
+  // If the user is currently picking a file via OS dialog, do not lock
+  if (state.isPickingFile) {
+    return;
+  }
   if (document.hidden) {
     if (state.screen === 'note-editor') {
       await saveCurrentNote();
@@ -2171,6 +2230,13 @@ document.addEventListener('visibilitychange', async () => {
       lockVault();
     }
   }
+});
+
+// Reset isPickingFile when browser window regains focus
+window.addEventListener('focus', () => {
+  setTimeout(() => {
+    state.isPickingFile = false;
+  }, 1000);
 });
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
