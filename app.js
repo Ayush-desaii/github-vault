@@ -910,6 +910,8 @@ async function cacheKeyForQuickUnlock(key, quickSecret) {
 // ─── Lock Vault ───────────────────────────────────────────────────────────────
 
 function lockVault() {
+  stopTotpTicker();
+
   // Hide all modals so orphaned dialogs don't stay visible on locked screen
   ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer', 'modal-settings'].forEach(id => {
     hideModal(id);
@@ -979,8 +981,9 @@ function renderVaultList() {
   container.innerHTML = '';
 
   // SVG icon strings reused in each card
-  const svgCopy = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M2 11V2h9"/></svg>`;
-  const svgEdit = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 2 3 3-8 8H3v-3l8-8z"/></svg>`;
+  const svgCopy   = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M2 11V2h9"/></svg>`;
+  const svgEdit   = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 2 3 3-8 8H3v-3l8-8z"/></svg>`;
+  const svgShield = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l6 2.5v4.5c0 4-3 6.5-6 7.5-3-1-6-3.5-6-7.5V4l6-2.5z"/><path d="M5.5 8l2 2 3.5-3.5"/></svg>`;
 
   sorted.forEach(entry => {
     const card = document.createElement('div');
@@ -1007,6 +1010,28 @@ function renderVaultList() {
 
     const domainDisplay = cleanDomain ? `<span class="entry-url">${escapeHtml(cleanDomain)}</span>` : '';
 
+    let totpHtml = '';
+    let totpActionBtn = '';
+    if (entry.totp) {
+      totpHtml = `
+        <div class="entry-totp-row">
+          <button type="button" class="entry-totp-chip" data-action="copy-totp" data-id="${entry.id}" title="Click to copy 2FA code">
+            <svg class="totp-chip-icon" viewBox="0 0 16 16"><use href="#ic-shield-check"/></svg>
+            <span class="totp-chip-label">2FA</span>
+            <span class="totp-chip-code" data-totp-code="${entry.id}">--- ---</span>
+            <span class="totp-chip-timer">
+              <svg class="totp-ring-svg" viewBox="0 0 20 20">
+                <circle class="totp-ring-bg" cx="10" cy="10" r="7"/>
+                <circle class="totp-ring-progress" cx="10" cy="10" r="7" data-totp-ring="${entry.id}"/>
+              </svg>
+              <span class="totp-chip-sec" data-totp-sec="${entry.id}">--s</span>
+            </span>
+          </button>
+        </div>
+      `;
+      totpActionBtn = `<button class="btn-icon" data-action="copy-totp" data-id="${entry.id}" title="Copy 2FA code" aria-label="Copy 2FA code" style="color:#22c55e">${svgShield}</button>`;
+    }
+
     card.innerHTML = `
       <div class="entry-icon">${iconContent}</div>
       <div class="entry-info">
@@ -1015,8 +1040,10 @@ function renderVaultList() {
           ${domainDisplay}
         </div>
         <div class="entry-username">${escapeHtml(entry.username)}</div>
+        ${totpHtml}
       </div>
       <div class="entry-actions">
+        ${totpActionBtn}
         <button class="btn-icon" data-action="copy" data-id="${entry.id}" title="Copy password" aria-label="Copy password">${svgCopy}</button>
         <button class="btn-icon" data-action="edit" data-id="${entry.id}" title="Edit" aria-label="Edit entry">${svgEdit}</button>
       </div>
@@ -1035,9 +1062,13 @@ function renderVaultList() {
       e.stopPropagation();
       const { action, id } = btn.dataset;
       if (action === 'copy') copyPassword(id, btn);
+      if (action === 'copy-totp') copyTotp(id, btn);
       if (action === 'edit') openEditModal(id);
     });
   });
+
+  updateAllVisibleTotp();
+  startTotpTicker();
 }
 
 function findEntry(id) {
@@ -1061,6 +1092,161 @@ async function copyPassword(entryId, btnElement = null) {
   }
 }
 
+// ─── TOTP Ticker & Actions ───────────────────────────────────────────────────
+
+let totpTickerInterval = null;
+
+function startTotpTicker() {
+  if (totpTickerInterval) clearInterval(totpTickerInterval);
+  updateAllVisibleTotp();
+  totpTickerInterval = setInterval(updateAllVisibleTotp, 1000);
+}
+
+function stopTotpTicker() {
+  if (totpTickerInterval) {
+    clearInterval(totpTickerInterval);
+    totpTickerInterval = null;
+  }
+}
+
+async function updateAllVisibleTotp() {
+  if (!state.vaultKey || state.screen !== 'vault' || state.activeTab !== 'passwords') {
+    return;
+  }
+
+  const chips = document.querySelectorAll('.entry-totp-chip');
+  for (const chip of chips) {
+    const id = chip.dataset.id;
+    const entry = findEntry(id);
+    if (!entry || !entry.totp) continue;
+
+    const parsed = Crypto.parseTotpSecret(entry.totp);
+    if (!parsed) continue;
+
+    const rem = Crypto.getTotpRemainingSeconds(parsed.period);
+    const codeElem = chip.querySelector('[data-totp-code]');
+    const secElem  = chip.querySelector('[data-totp-sec]');
+    const ringElem = chip.querySelector('[data-totp-ring]');
+
+    if (secElem) secElem.textContent = `${rem}s`;
+    if (ringElem) {
+      const circ = 43.98;
+      const offset = circ * (1 - rem / parsed.period);
+      ringElem.style.strokeDashoffset = offset;
+    }
+
+    if (rem <= 5) {
+      chip.classList.add('totp-expiring');
+    } else {
+      chip.classList.remove('totp-expiring');
+    }
+
+    // Refresh code on step change or initial placeholder
+    const currentStep = Math.floor(Math.floor(Date.now() / 1000) / parsed.period);
+    if (codeElem && (codeElem.dataset.step !== String(currentStep) || codeElem.textContent.includes('-'))) {
+      const code = await Crypto.generateTOTP(entry.totp);
+      if (code && codeElem) {
+        codeElem.textContent = Crypto.formatTotpCode(code);
+        codeElem.dataset.step = String(currentStep);
+        codeElem.dataset.raw = code;
+      }
+    }
+  }
+
+  // Update modal preview if open
+  updateTotpPreview();
+}
+
+async function copyTotp(entryId, btnElement = null) {
+  const entry = findEntry(entryId);
+  if (!entry || !entry.totp) return;
+
+  try {
+    const code = await Crypto.generateTOTP(entry.totp);
+    if (!code) {
+      Toast.error('Invalid 2FA secret key');
+      return;
+    }
+
+    const rem = Crypto.getTotpRemainingSeconds();
+    await Clipboard.copy(code, `2FA Code for ${entry.name} copied! (${rem}s left)`);
+
+    // Micro-interaction
+    if (btnElement) {
+      if (btnElement.classList.contains('entry-totp-chip')) {
+        const origBg = btnElement.style.background;
+        const origBorder = btnElement.style.borderColor;
+        btnElement.style.background = 'rgba(34, 197, 94, 0.28)';
+        btnElement.style.borderColor = '#22c55e';
+        setTimeout(() => {
+          btnElement.style.background = origBg;
+          btnElement.style.borderColor = origBorder;
+        }, 1200);
+      } else {
+        const origHtml = btnElement.innerHTML;
+        btnElement.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8l4.5 4.5L14 4"/></svg>`;
+        btnElement.style.color = '#22c55e';
+        setTimeout(() => {
+          btnElement.innerHTML = origHtml;
+          btnElement.style.color = '';
+        }, 1500);
+      }
+    }
+  } catch {
+    Toast.error('Could not generate 2FA code.');
+  }
+}
+
+async function updateTotpPreview() {
+  const modal = document.getElementById('modal-entry');
+  if (!modal || modal.classList.contains('hidden')) return;
+
+  const input = document.getElementById('entry-totp');
+  const previewBox = document.getElementById('entry-totp-preview');
+  if (!input || !previewBox) return;
+
+  const val = input.value.trim();
+  if (!val) {
+    previewBox.classList.add('hidden');
+    return;
+  }
+
+  const parsed = Crypto.parseTotpSecret(val);
+  if (!parsed) {
+    previewBox.classList.add('hidden');
+    return;
+  }
+
+  try {
+    const code = await Crypto.generateTOTP(val);
+    if (!code) {
+      previewBox.classList.add('hidden');
+      return;
+    }
+
+    const rem = Crypto.getTotpRemainingSeconds(parsed.period);
+    const codeElem = document.getElementById('totp-preview-code');
+    const secElem  = document.getElementById('totp-preview-sec');
+    const ringElem = document.getElementById('totp-preview-ring');
+
+    if (codeElem) codeElem.textContent = Crypto.formatTotpCode(code);
+    if (secElem) secElem.textContent = `${rem}s`;
+    if (ringElem) {
+      const circ = 43.98;
+      const offset = circ * (1 - rem / parsed.period);
+      ringElem.style.strokeDashoffset = offset;
+      if (rem <= 5) {
+        ringElem.style.stroke = '#f59e0b';
+      } else {
+        ringElem.style.stroke = '#22c55e';
+      }
+    }
+    previewBox.classList.remove('hidden');
+  } catch {
+    previewBox.classList.add('hidden');
+  }
+}
+
 // ─── Add / Edit Modal ─────────────────────────────────────────────────────────
 
 function openAddModal() {
@@ -1071,7 +1257,9 @@ function openAddModal() {
   document.getElementById('entry-url').value      = '';
   document.getElementById('entry-username').value = '';
   document.getElementById('entry-password').value = '';
+  document.getElementById('entry-totp').value     = '';
   document.getElementById('entry-notes').value    = '';
+  document.getElementById('entry-totp-preview').classList.add('hidden');
   document.getElementById('modal-entry-delete').classList.add('hidden');
 
   showModal('modal-entry');
@@ -1088,9 +1276,11 @@ function openEditModal(id) {
   document.getElementById('entry-url').value      = entry.url      || '';
   document.getElementById('entry-username').value = entry.username;
   document.getElementById('entry-password').value = entry.password;
+  document.getElementById('entry-totp').value     = entry.totp     || '';
   document.getElementById('entry-notes').value    = entry.notes    || '';
   document.getElementById('modal-entry-delete').classList.remove('hidden');
 
+  updateTotpPreview();
   showModal('modal-entry');
 }
 
@@ -1099,11 +1289,21 @@ async function saveEntry() {
   const url      = document.getElementById('entry-url').value.trim();
   const username = document.getElementById('entry-username').value.trim();
   const password = document.getElementById('entry-password').value;
+  const totp     = document.getElementById('entry-totp').value.trim();
   const notes    = document.getElementById('entry-notes').value.trim();
 
   if (!name || !username || !password) {
     Toast.error('Name, username, and password are required.');
     return;
+  }
+
+  if (totp) {
+    const parsed = Crypto.parseTotpSecret(totp);
+    if (!parsed) {
+      if (!confirm('The entered 2FA secret does not look like a valid Base32 key or otpauth:// URI.\n\nDo you want to save it anyway?')) {
+        return;
+      }
+    }
   }
 
   const now = new Date().toISOString();
@@ -1114,7 +1314,7 @@ async function saveEntry() {
     if (idx !== -1) {
       state.vault.entries[idx] = {
         ...state.vault.entries[idx],
-        name, url, username, password, notes,
+        name, url, username, password, totp, notes,
         updated_at: now,
       };
     }
@@ -1122,7 +1322,7 @@ async function saveEntry() {
     // Create new
     state.vault.entries.push({
       id:         uuid(),
-      name, url, username, password, notes,
+      name, url, username, password, totp, notes,
       created_at: now,
       updated_at: now,
     });
@@ -1173,6 +1373,7 @@ function switchVaultTab(tab) {
   const brandIcon  = document.getElementById('vault-brand-icon');
 
   if (tab === 'journal') {
+    stopTotpTicker();
     jrnView?.classList.remove('hidden');
     fab?.classList.add('fab-journal');
     if (brandTitle) brandTitle.textContent = 'Journal';
@@ -1181,6 +1382,7 @@ function switchVaultTab(tab) {
     const grid = document.getElementById('journal-grid');
     if (grid) grid.scrollTop = 0;
   } else if (tab === 'docs') {
+    stopTotpTicker();
     docsView?.classList.remove('hidden');
     fab?.classList.add('fab-docs');
     if (brandTitle) brandTitle.textContent = 'Docs';
@@ -2378,6 +2580,21 @@ function initEventListeners() {
     Toast.info('Generated password filled in.');
   });
 
+  // TOTP live preview and paste in entry modal
+  document.getElementById('entry-totp')?.addEventListener('input', updateTotpPreview);
+  document.getElementById('entry-totp-paste')?.addEventListener('click', async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        document.getElementById('entry-totp').value = text.trim();
+        updateTotpPreview();
+        Toast.info('Pasted 2FA secret from clipboard');
+      }
+    } catch {
+      document.getElementById('entry-totp').focus();
+    }
+  });
+
   // ── Generator modal ───────────────────────────────────────────────────────
   document.getElementById('modal-gen-close').addEventListener('click', () => hideModal('modal-generator'));
   document.getElementById('gen-refresh-btn').addEventListener('click', regeneratePassword);
@@ -2617,6 +2834,7 @@ async function confirmImport() {
     url:        e.url,
     username:   e.username,
     password:   e.password,
+    totp:       e.totp || '',
     notes:      e.notes || '',
     created_at: now,
     updated_at: now,
@@ -2663,6 +2881,7 @@ function parseGoogleCsv(text) {
   const usernameCol = col('username');
   const passwordCol = col('password');
   const noteCol     = col('note');
+  const totpCol     = headers.findIndex(h => h === 'totp' || h === 'otp' || h === 'login_totp' || h === '2fa');
 
   if (usernameCol === -1 || passwordCol === -1) {
     throw new Error(
@@ -2696,6 +2915,7 @@ function parseGoogleCsv(text) {
       url:   rawUrl,
       username,
       password,
+      totp:  totpCol >= 0 ? (cols[totpCol]?.trim() || '') : '',
       notes: noteCol >= 0 ? (cols[noteCol] || '') : '',
     });
   }

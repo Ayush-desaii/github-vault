@@ -383,6 +383,183 @@ const Crypto = (() => {
     }
   }
 
+  // ─── TOTP / 2FA Authenticator (RFC 6238 / RFC 4226) ─────────────────────────
+
+  /** Cache imported HMAC CryptoKeys by algorithm + secret */
+  const totpKeyCache = new Map();
+
+  /**
+   * Decode Base32 string (RFC 4648) to Uint8Array.
+   * Tolerates spaces, dashes, lowercase, and omitted padding.
+   * @param {string} b32
+   * @returns {Uint8Array}
+   */
+  function base32ToBytes(b32) {
+    if (!b32 || typeof b32 !== 'string') return new Uint8Array(0);
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const clean = b32.toUpperCase().replace(/[\s=-]/g, '');
+    if (!clean) return new Uint8Array(0);
+
+    let bits = 0;
+    let value = 0;
+    const bytes = [];
+
+    for (let i = 0; i < clean.length; i++) {
+      const idx = alphabet.indexOf(clean[i]);
+      if (idx === -1) {
+        throw new Error(`Invalid Base32 character: ${clean[i]}`);
+      }
+      value = (value << 5) | idx;
+      bits += 5;
+      if (bits >= 8) {
+        bytes.push((value >>> (bits - 8)) & 0xff);
+        bits -= 8;
+      }
+    }
+    return new Uint8Array(bytes);
+  }
+
+  /**
+   * Parse a raw Base32 secret or otpauth:// URI.
+   * Returns normalized metadata or null if invalid.
+   * @param {string} input
+   * @returns {{secret: string, period: number, digits: number, algorithm: string}|null}
+   */
+  function parseTotpSecret(input) {
+    if (!input || typeof input !== 'string') return null;
+    const str = input.trim();
+    if (!str) return null;
+
+    if (str.toLowerCase().startsWith('otpauth://')) {
+      try {
+        const url = new URL(str);
+        const secret = url.searchParams.get('secret');
+        if (!secret) return null;
+        const period = parseInt(url.searchParams.get('period') || '30', 10);
+        const digits = parseInt(url.searchParams.get('digits') || '6', 10);
+        const algorithm = (url.searchParams.get('algorithm') || 'SHA1').toUpperCase();
+        const cleanSecret = secret.replace(/[\s-]/g, '').toUpperCase();
+        if (!/^[A-Z2-7]+=*$/.test(cleanSecret)) return null;
+        return {
+          secret: cleanSecret,
+          period: isNaN(period) || period <= 0 ? 30 : period,
+          digits: isNaN(digits) || digits <= 0 ? 6 : digits,
+          algorithm: algorithm === 'SHA256' ? 'SHA-256' : (algorithm === 'SHA512' ? 'SHA-512' : 'SHA-1')
+        };
+      } catch {
+        const match = str.match(/secret=([A-Za-z2-7=]+)/i);
+        if (match) {
+          const cleanSecret = match[1].replace(/[\s-]/g, '').toUpperCase();
+          if (/^[A-Z2-7]+=*$/.test(cleanSecret)) {
+            return { secret: cleanSecret, period: 30, digits: 6, algorithm: 'SHA-1' };
+          }
+        }
+        return null;
+      }
+    }
+
+    const clean = str.replace(/[\s-]/g, '').toUpperCase();
+    if (/^[A-Z2-7]+=*$/.test(clean)) {
+      return {
+        secret: clean,
+        period: 30,
+        digits: 6,
+        algorithm: 'SHA-1'
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Get or import an HMAC CryptoKey for TOTP.
+   */
+  async function getTotpCryptoKey(secret, algorithm = 'SHA-1') {
+    const cacheKey = `${algorithm}:${secret}`;
+    let key = totpKeyCache.get(cacheKey);
+    if (!key) {
+      const keyBytes = base32ToBytes(secret);
+      key = await crypto.subtle.importKey(
+        'raw',
+        keyBytes,
+        { name: 'HMAC', hash: { name: algorithm } },
+        false,
+        ['sign']
+      );
+      totpKeyCache.set(cacheKey, key);
+    }
+    return key;
+  }
+
+  /**
+   * Generate RFC 6238 TOTP code.
+   * @param {string} secretInput  Raw Base32 or otpauth:// URI
+   * @param {object} [options]
+   * @param {number} [options.period=30]
+   * @param {number} [options.digits=6]
+   * @param {string} [options.algorithm='SHA-1']
+   * @param {number} [options.timestamp=Date.now()]
+   * @returns {Promise<string|null>} 6 (or 8) digit code
+   */
+  async function generateTOTP(secretInput, options = {}) {
+    const parsed = parseTotpSecret(secretInput);
+    if (!parsed) return null;
+
+    const period    = options.period    || parsed.period    || 30;
+    const digits    = options.digits    || parsed.digits    || 6;
+    const algorithm = options.algorithm || parsed.algorithm || 'SHA-1';
+    const timestamp = options.timestamp !== undefined ? options.timestamp : Date.now();
+
+    const epochSeconds = Math.floor(timestamp / 1000);
+    const counter = Math.floor(epochSeconds / period);
+
+    const buffer = new ArrayBuffer(8);
+    const view = new DataView(buffer);
+    view.setUint32(0, Math.floor(counter / 0x100000000), false);
+    view.setUint32(4, counter >>> 0, false);
+
+    try {
+      const cryptoKey = await getTotpCryptoKey(parsed.secret, algorithm);
+      const signature = await crypto.subtle.sign('HMAC', cryptoKey, buffer);
+      const hmac = new Uint8Array(signature);
+      const offset = hmac[hmac.length - 1] & 0x0f;
+      const binary =
+        ((hmac[offset] & 0x7f) << 24) |
+        ((hmac[offset + 1] & 0xff) << 16) |
+        ((hmac[offset + 2] & 0xff) << 8) |
+        (hmac[offset + 3] & 0xff);
+
+      const otp = binary % Math.pow(10, digits);
+      return String(otp).padStart(digits, '0');
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Calculate remaining seconds in current TOTP cycle.
+   * @param {number} [period=30]
+   * @param {number} [timestamp=Date.now()]
+   * @returns {number}
+   */
+  function getTotpRemainingSeconds(period = 30, timestamp = Date.now()) {
+    const epochSeconds = Math.floor(timestamp / 1000);
+    const rem = period - (epochSeconds % period);
+    return rem === 0 ? period : rem;
+  }
+
+  /**
+   * Format code with a space for human readability (e.g. "123 456").
+   * @param {string} code
+   * @returns {string}
+   */
+  function formatTotpCode(code) {
+    if (!code || typeof code !== 'string') return '';
+    if (code.length === 6) return `${code.slice(0, 3)} ${code.slice(3)}`;
+    if (code.length === 8) return `${code.slice(0, 4)} ${code.slice(4)}`;
+    return code;
+  }
+
   // ─── Public API ───────────────────────────────────────────────────────────
 
   return {
@@ -400,6 +577,11 @@ const Crypto = (() => {
     unwrapKey,
     generatePassword,
     passwordStrength,
+    base32ToBytes,
+    parseTotpSecret,
+    generateTOTP,
+    getTotpRemainingSeconds,
+    formatTotpCode,
   };
 
 })();

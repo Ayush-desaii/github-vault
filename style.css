@@ -2181,3 +2181,165 @@ input[type="range"] {
 .btn-bio:active {
   transform: scale(0.97);
 }
+
+/* ── TOTP 2FA Authenticator ─────────────────────────────────────────── */
+
+.entry-totp-row {
+  display: flex;
+  align-items: center;
+  margin-top: 3px;
+}
+
+.entry-totp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 7px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: var(--r-full);
+  color: var(--t1);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background var(--t), border-color var(--t), transform 0.1s ease, box-shadow var(--t);
+  user-select: none;
+  -webkit-user-select: none;
+  max-width: 100%;
+}
+
+.entry-totp-chip:hover {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.45);
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.15);
+}
+
+.entry-totp-chip:active {
+  transform: scale(0.97);
+}
+
+.entry-totp-chip.totp-expiring {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.entry-totp-chip.totp-expiring .totp-chip-code {
+  color: #f59e0b;
+}
+
+.entry-totp-chip.totp-expiring .totp-ring-progress {
+  stroke: #f59e0b !important;
+}
+
+.totp-chip-icon {
+  width: 12px;
+  height: 12px;
+  color: #22c55e;
+  flex-shrink: 0;
+}
+
+.entry-totp-chip.totp-expiring .totp-chip-icon {
+  color: #f59e0b;
+}
+
+.totp-chip-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--t3);
+  margin-right: 2px;
+}
+
+.totp-chip-code {
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: var(--w);
+}
+
+.totp-chip-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+}
+
+.totp-ring-svg {
+  width: 14px;
+  height: 14px;
+  transform: rotate(-90deg);
+  flex-shrink: 0;
+}
+
+.totp-ring-bg {
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 2;
+  fill: none;
+}
+
+.totp-ring-progress {
+  stroke: #22c55e;
+  stroke-width: 2;
+  stroke-linecap: round;
+  fill: none;
+  stroke-dasharray: 43.98;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 0.8s linear, stroke 0.25s ease;
+}
+
+.totp-chip-sec {
+  font-size: 10px;
+  color: var(--t3);
+  min-width: 16px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Modal Live Preview */
+.totp-preview-box {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.22);
+  border-radius: var(--r-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.totp-preview-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.totp-preview-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  background: rgba(34, 197, 94, 0.2);
+  color: #22c55e;
+  border-radius: var(--r-full);
+}
+
+.totp-preview-code {
+  font-size: 16px;
+  font-weight: 700;
+  font-family: var(--mono);
+  letter-spacing: 1px;
+  color: var(--w);
+  font-variant-numeric: tabular-nums;
+}
+
+.totp-preview-timer {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
+}
