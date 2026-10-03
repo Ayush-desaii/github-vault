@@ -1495,3 +1495,371 @@ input[type="range"] {
 }
 
 .note-content-input::placeholder { color: var(--t3); }
+
+/* ── Documents / Emergency IDs View ───────────────────────────────────────── */
+
+.docs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 14px;
+  padding: 16px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+@media (max-width: 600px) {
+  .docs-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 12px;
+  }
+}
+
+.doc-card {
+  background: var(--bg-1, #16161a);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg, 16px);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  transition: transform .12s var(--ease-spring), background var(--t), border-color var(--t);
+  position: relative;
+  overflow: hidden;
+}
+
+.doc-card:hover {
+  background: var(--bg-2);
+  border-color: var(--line2);
+}
+
+.doc-card:active {
+  transform: scale(0.98);
+}
+
+.doc-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.doc-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.doc-type-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.doc-type-icon.icon-signature {
+  background: rgba(168, 85, 247, 0.12);
+  border-color: rgba(168, 85, 247, 0.25);
+  color: #c084fc;
+}
+
+.doc-type-icon.icon-pan {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.25);
+  color: #fbbf24;
+}
+
+.doc-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--w);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-card-holder {
+  font-size: 12px;
+  color: var(--t2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Quick Copy Document Number Box */
+.doc-num-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-2);
+  border: 1px solid var(--line2);
+  border-radius: var(--r-sm, 8px);
+  padding: 6px 10px;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--w);
+  letter-spacing: .5px;
+}
+
+.doc-num-text {
+  user-select: all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-num-copy-btn {
+  background: none;
+  border: none;
+  color: var(--t2);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: var(--font);
+  transition: color var(--t), background var(--t);
+  flex-shrink: 0;
+}
+
+.doc-num-copy-btn:hover {
+  color: var(--w);
+  background: var(--bg-3);
+}
+
+.doc-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--t3);
+  margin-top: 2px;
+}
+
+.doc-expiry-badge {
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.doc-expiry-badge.expired {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.doc-expiry-badge.expiring-soon {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+}
+
+/* File attachments chips in card */
+.doc-files-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.doc-file-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg-3);
+  border: 1px solid var(--line2);
+  color: var(--t2);
+  cursor: pointer;
+  transition: background var(--t), color var(--t);
+}
+
+.doc-file-pill:hover {
+  background: var(--line2);
+  color: var(--w);
+}
+
+/* Preset buttons inside modal */
+.doc-preset-row {
+  margin-bottom: 14px;
+}
+
+.doc-preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.doc-preset-btn {
+  background: var(--bg-2);
+  border: 1px solid var(--line2);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--t2);
+  cursor: pointer;
+  transition: all var(--t);
+}
+
+.doc-preset-btn:hover {
+  background: var(--bg-3);
+  color: var(--w);
+  border-color: var(--line3);
+}
+
+.field-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 520px) {
+  .field-row-2 {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
+.select-field, .date-field {
+  width: 100%;
+  background: var(--bg-2);
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  color: var(--t1);
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color var(--t);
+}
+
+.select-field:focus, .date-field:focus {
+  border-color: var(--w);
+}
+
+.doc-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 12px;
+  height: auto;
+}
+
+.doc-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.doc-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--line2);
+  border-radius: var(--r-sm);
+  gap: 10px;
+}
+
+.doc-file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.doc-file-name {
+  font-size: 13px;
+  color: var(--w);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-file-meta {
+  font-size: 11px;
+  color: var(--t3);
+}
+
+.doc-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Sky blue FAB for Docs tab */
+.btn-fab.fab-docs {
+  background: #0284c7;
+  color: #ffffff;
+  box-shadow: 0 8px 24px rgba(2, 132, 199, 0.45), 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Full-Screen Document Viewer */
+.modal-box-fullscreen {
+  max-width: 900px;
+  width: 95vw;
+  height: 90vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.viewer-header-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.viewer-body {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: #09090b;
+}
+
+.viewer-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.viewer-container img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--r-sm);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.viewer-container iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: var(--r-sm);
+  background: #fff;
+}

@@ -54,7 +54,7 @@ const state = {
   // Search filter string
   searchQuery: '',
 
-  // Active vault tab ('passwords' | 'journal')
+  // Active vault tab ('passwords' | 'journal' | 'docs')
   activeTab: 'passwords',
 
   // Currently editing journal note id (null = creating new)
@@ -62,6 +62,18 @@ const state = {
 
   // Journal search filter string
   journalSearchQuery: '',
+
+  // Currently editing doc id (null = creating new)
+  editingDocId: null,
+
+  // Docs search filter string
+  docSearchQuery: '',
+
+  // Docs category filter ('all' | 'identity' | 'signature' | 'other')
+  docCategoryFilter: 'all',
+
+  // Temporary list of attached files in doc modal
+  currentDocDraftFiles: [],
 };
 
 // ─── Screen Management ────────────────────────────────────────────────────────
@@ -515,6 +527,7 @@ function initSetupWizard() {
 
         state.vault     = data;
         if (state.vault && !state.vault.notes) state.vault.notes = [];
+        if (state.vault && !state.vault.docs) state.vault.docs = [];
         state.vaultKey  = key;
         state.vaultSalt = salt;
         state.vaultBlob = blob;
@@ -540,6 +553,7 @@ function initSetupWizard() {
         github_pat: pat,
         entries:    [],
         notes:      [],
+        docs:       [],
         created_at: new Date().toISOString(),
       };
 
@@ -593,13 +607,19 @@ function initSetupWizard() {
 
   // ── Step 4: Done ─────────────────────────────────────────────────────────
 
+function renderActiveTab() {
+  if (state.activeTab === 'journal') {
+    renderJournalList();
+  } else if (state.activeTab === 'docs') {
+    renderDocsList();
+  } else {
+    renderVaultList();
+  }
+}
+
   document.getElementById('setup-done-btn').addEventListener('click', () => {
     showScreen('vault');
-    if (state.activeTab === 'journal') {
-      renderJournalList();
-    } else {
-      renderVaultList();
-    }
+    renderActiveTab();
   });
 }
 
@@ -775,6 +795,7 @@ async function handleFullUnlock(quickType) {
 
     state.vault     = data;
     if (state.vault && !state.vault.notes) state.vault.notes = [];
+    if (state.vault && !state.vault.docs)  state.vault.docs  = [];
     state.vaultKey  = key;
     state.vaultSalt = salt;
     state.vaultSha  = sessionGet('vault_sha');
@@ -789,11 +810,7 @@ async function handleFullUnlock(quickType) {
     await cacheKeyForQuickUnlock(key, quickSecret);
 
     showScreen('vault');
-    if (state.activeTab === 'journal') {
-      renderJournalList();
-    } else {
-      renderVaultList();
-    }
+    renderActiveTab();
 
   } catch (err) {
     const msg = err.message === 'DECRYPT_FAILED'
@@ -840,17 +857,14 @@ async function handleQuickUnlock(quickSecret) {
 
     state.vault     = data;
     if (state.vault && !state.vault.notes) state.vault.notes = [];
+    if (state.vault && !state.vault.docs)  state.vault.docs  = [];
     state.vaultKey  = key;
     state.vaultSalt = salt;
     state.vaultBlob = blob;
     state.vaultSha  = sessionGet('vault_sha');
 
     showScreen('vault');
-    if (state.activeTab === 'journal') {
-      renderJournalList();
-    } else {
-      renderVaultList();
-    }
+    renderActiveTab();
 
   } catch {
     showErr(errEl, 'Wrong PIN/pattern. Try again.');
@@ -1109,25 +1123,38 @@ async function deleteEntry() {
 
 function switchVaultTab(tab) {
   state.activeTab = tab;
-  const pwTabBtn  = document.getElementById('tab-passwords-btn');
-  const jrnTabBtn = document.getElementById('tab-journal-btn');
-  const pwView    = document.getElementById('vault-view-passwords');
-  const jrnView   = document.getElementById('vault-view-journal');
-  const fab       = document.getElementById('vault-fab-btn');
+  const pwTabBtn   = document.getElementById('tab-passwords-btn');
+  const jrnTabBtn  = document.getElementById('tab-journal-btn');
+  const docsTabBtn = document.getElementById('tab-docs-btn');
+
+  const pwView   = document.getElementById('vault-view-passwords');
+  const jrnView  = document.getElementById('vault-view-journal');
+  const docsView = document.getElementById('vault-view-docs');
+  const fab      = document.getElementById('vault-fab-btn');
+
+  pwTabBtn?.classList.remove('active');
+  jrnTabBtn?.classList.remove('active');
+  docsTabBtn?.classList.remove('active');
+
+  pwView?.classList.add('hidden');
+  jrnView?.classList.add('hidden');
+  docsView?.classList.add('hidden');
+
+  fab?.classList.remove('fab-journal', 'fab-docs');
 
   if (tab === 'journal') {
-    pwTabBtn?.classList.remove('active');
     jrnTabBtn?.classList.add('active');
-    pwView?.classList.add('hidden');
     jrnView?.classList.remove('hidden');
     fab?.classList.add('fab-journal');
     renderJournalList();
+  } else if (tab === 'docs') {
+    docsTabBtn?.classList.add('active');
+    docsView?.classList.remove('hidden');
+    fab?.classList.add('fab-docs');
+    renderDocsList();
   } else {
-    jrnTabBtn?.classList.remove('active');
     pwTabBtn?.classList.add('active');
-    jrnView?.classList.add('hidden');
     pwView?.classList.remove('hidden');
-    fab?.classList.remove('fab-journal');
     renderVaultList();
   }
 }
@@ -1323,6 +1350,567 @@ async function deleteCurrentNote() {
   Toast.success('Note deleted.');
 }
 
+// ─── Emergency Documents (Approach B: Individual Encrypted Files) ─────────────
+
+// In-memory cache for decrypted blob URLs: { [file_path]: blobUrl }
+const _decryptedDocCache = {};
+
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function getDocIconInfo(category, name) {
+  const n = (name || '').toLowerCase();
+  const c = (category || '').toLowerCase();
+
+  if (c === 'signature' || n.includes('sign')) {
+    return { icon: '✍️', cls: 'icon-signature' };
+  }
+  if (n.includes('pan')) {
+    return { icon: '🪪', cls: 'icon-pan' };
+  }
+  if (n.includes('license') || n.includes('dl') || n.includes('driving')) {
+    return { icon: '🚗', cls: '' };
+  }
+  if (n.includes('passport') || c === 'travel') {
+    return { icon: '🛂', cls: '' };
+  }
+  if (n.includes('aadhaar') || n.includes('aadhar')) {
+    return { icon: '🆔', cls: '' };
+  }
+  return { icon: '📄', cls: '' };
+}
+
+function renderDocsList() {
+  const container = document.getElementById('docs-grid');
+  if (!container) return;
+
+  const q = (state.docSearchQuery || '').toLowerCase().trim();
+  const cat = state.docCategoryFilter || 'all';
+  const docs = state.vault?.docs || [];
+
+  const filtered = docs.filter(d => {
+    const matchesCat = cat === 'all' || (d.category || 'other').toLowerCase() === cat.toLowerCase();
+    if (!matchesCat) return false;
+
+    if (!q) return true;
+    return (
+      (d.name || '').toLowerCase().includes(q) ||
+      (d.number || '').toLowerCase().includes(q) ||
+      (d.holder_name || '').toLowerCase().includes(q) ||
+      (d.notes || '').toLowerCase().includes(q)
+    );
+  });
+
+  // Sort: most recently updated first
+  const sorted = [...filtered].sort((a, b) =>
+    new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
+  );
+
+  const countBadge = document.getElementById('docs-count-badge');
+  if (countBadge) {
+    const total = docs.length;
+    const shown = sorted.length;
+    countBadge.textContent = q || cat !== 'all' ? `${shown} of ${total}` : `${total} doc${total !== 1 ? 's' : ''}`;
+  }
+
+  if (sorted.length === 0) {
+    container.innerHTML = `
+      <div class="journal-empty" style="grid-column: 1 / -1;">
+        <div class="vault-empty-icon">
+          <svg width="34" height="34" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity=".3">
+            <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
+            <circle cx="5" cy="7" r="1.5"/>
+            <path d="M3.5 11a1.5 1.5 0 0 1 3 0M8.5 6.5h4M8.5 9h2.5"/>
+          </svg>
+        </div>
+        <h3>${q ? `No documents matching "${escapeHtml(q)}"` : 'No emergency documents yet'}</h3>
+        <p>${q ? 'Try a different search or filter.' : 'Tap + to add your Driving License, PAN card, Passport, or Signature.'}</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+
+  sorted.forEach(doc => {
+    const card = document.createElement('div');
+    card.className = 'doc-card';
+    card.dataset.id = doc.id;
+
+    const { icon, cls } = getDocIconInfo(doc.category, doc.name);
+
+    // Document number quick-copy box
+    let numberHtml = '';
+    if (doc.number) {
+      numberHtml = `
+        <div class="doc-num-chip">
+          <span class="doc-num-text">${escapeHtml(doc.number)}</span>
+          <button type="button" class="doc-num-copy-btn" data-action="copy-num" data-id="${doc.id}" title="Copy number" aria-label="Copy document number">
+            <svg class="ic ic-sm"><use href="#ic-copy"/></svg>
+            <span>Copy</span>
+          </button>
+        </div>
+      `;
+    }
+
+    // Expiry date calculation
+    let expiryHtml = '';
+    if (doc.expiry_date) {
+      const exp = new Date(doc.expiry_date);
+      const now = new Date();
+      const diffDays = Math.ceil((exp - now) / (1000 * 60 * 60 * 24));
+
+      let badgeCls = '';
+      let badgeLabel = `Exp: ${doc.expiry_date}`;
+      if (diffDays < 0) {
+        badgeCls = 'expired';
+        badgeLabel = 'Expired';
+      } else if (diffDays <= 90) {
+        badgeCls = 'expiring-soon';
+        badgeLabel = `Expires in ${diffDays}d`;
+      }
+      expiryHtml = `<span class="doc-expiry-badge ${badgeCls}">${escapeHtml(badgeLabel)}</span>`;
+    }
+
+    // Attached files pills
+    let filesHtml = '';
+    const files = doc.files || [];
+    if (files.length > 0) {
+      const pills = files.map(f => {
+        const isPdf = (f.file_type || '').includes('pdf') || (f.file_name || '').endsWith('.pdf');
+        const iconSymbol = isPdf ? '#ic-doc' : '#ic-eye';
+        return `
+          <button type="button" class="doc-file-pill" data-action="view-file" data-doc-id="${doc.id}" data-file-id="${f.file_id}">
+            <svg class="ic ic-sm"><use href="${iconSymbol}"/></svg>
+            <span>${escapeHtml(f.label || f.file_name)}</span>
+            <span style="opacity:0.6;font-size:10px">${formatBytes(f.file_size)}</span>
+          </button>
+        `;
+      }).join('');
+      filesHtml = `<div class="doc-files-pills">${pills}</div>`;
+    }
+
+    const holderHtml = doc.holder_name ? `<div class="doc-card-holder">${escapeHtml(doc.holder_name)}</div>` : '';
+
+    card.innerHTML = `
+      <div class="doc-card-header">
+        <div class="doc-card-title-row">
+          <div class="doc-type-icon ${cls}">${icon}</div>
+          <div style="min-width:0;flex:1">
+            <div class="doc-card-title">${escapeHtml(doc.name)}</div>
+            ${holderHtml}
+          </div>
+        </div>
+        ${expiryHtml}
+      </div>
+      ${numberHtml}
+      ${filesHtml}
+    `;
+
+    card.addEventListener('click', e => {
+      if (e.target.closest('[data-action]')) return;
+      openDocModal(doc.id);
+    });
+
+    container.appendChild(card);
+  });
+
+  // Action button delegates
+  container.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const action = btn.dataset.action;
+      if (action === 'copy-num') {
+        const docId = btn.dataset.id;
+        copyDocNumber(docId, btn);
+      } else if (action === 'view-file') {
+        const { docId, fileId } = btn.dataset;
+        viewDocFile(docId, fileId);
+      }
+    });
+  });
+}
+
+async function copyDocNumber(docId, btnElement = null) {
+  const doc = state.vault?.docs?.find(d => d.id === docId);
+  if (!doc || !doc.number) return;
+  await Clipboard.copy(doc.number, `${doc.name} number copied!`);
+
+  if (btnElement) {
+    const origHtml = btnElement.innerHTML;
+    btnElement.innerHTML = `<svg class="ic ic-sm" style="color:#22c55e"><use href="#ic-check"/></svg><span style="color:#22c55e">Copied</span>`;
+    setTimeout(() => {
+      btnElement.innerHTML = origHtml;
+    }, 1500);
+  }
+}
+
+function openDocModal(docId) {
+  state.editingDocId = docId;
+  const doc = docId ? state.vault?.docs?.find(d => d.id === docId) : null;
+
+  document.getElementById('modal-doc-title').textContent = doc ? 'Edit Document' : 'Add Document';
+  document.getElementById('doc-name').value = doc ? doc.name : '';
+  document.getElementById('doc-category').value = doc ? (doc.category || 'identity') : 'identity';
+  document.getElementById('doc-number').value = doc ? (doc.number || '') : '';
+  document.getElementById('doc-holder-name').value = doc ? (doc.holder_name || '') : '';
+  document.getElementById('doc-expiry-date').value = doc ? (doc.expiry_date || '') : '';
+  document.getElementById('doc-notes').value = doc ? (doc.notes || '') : '';
+
+  const delBtn = document.getElementById('modal-doc-delete');
+  if (delBtn) delBtn.classList.toggle('hidden', !doc);
+
+  state.currentDocDraftFiles = doc?.files ? doc.files.map(f => ({ ...f })) : [];
+  renderDocDraftFiles();
+
+  showModal('modal-doc');
+  if (!docId) {
+    document.getElementById('doc-name').focus();
+  }
+}
+
+function applyDocPreset(type) {
+  const nameInput = document.getElementById('doc-name');
+  const catInput  = document.getElementById('doc-category');
+  const numInput  = document.getElementById('doc-number');
+
+  if (type === 'pan') {
+    nameInput.value = 'PAN Card';
+    catInput.value = 'identity';
+    numInput.placeholder = 'e.g. ABCDE1234F';
+  } else if (type === 'dl') {
+    nameInput.value = 'Driving License';
+    catInput.value = 'identity';
+    numInput.placeholder = 'e.g. DL-1420110012345';
+  } else if (type === 'passport') {
+    nameInput.value = 'Passport';
+    catInput.value = 'travel';
+    numInput.placeholder = 'e.g. M1234567';
+  } else if (type === 'sign') {
+    nameInput.value = 'Digital Signature';
+    catInput.value = 'signature';
+    numInput.placeholder = '(Optional reference/notes)';
+  }
+  nameInput.focus();
+}
+
+function renderDocDraftFiles() {
+  const container = document.getElementById('doc-files-list');
+  if (!container) return;
+
+  if (state.currentDocDraftFiles.length === 0) {
+    container.innerHTML = `
+      <div style="padding:12px;text-align:center;border:1px dashed var(--line2);border-radius:var(--r-sm);color:var(--t3);font-size:12px">
+        No files attached yet. Tap "Add File / Photo / PDF" above.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = '';
+
+  state.currentDocDraftFiles.forEach((file, index) => {
+    const item = document.createElement('div');
+    item.className = 'doc-file-item';
+
+    const isPdf = (file.file_type || '').includes('pdf') || (file.file_name || '').endsWith('.pdf');
+    const iconSymbol = isPdf ? '#ic-doc' : '#ic-eye';
+
+    item.innerHTML = `
+      <div class="doc-file-info">
+        <svg class="ic" style="color:var(--t2)"><use href="${iconSymbol}"/></svg>
+        <div style="min-width:0">
+          <div class="doc-file-name">${escapeHtml(file.label || file.file_name)}</div>
+          <div class="doc-file-meta">${escapeHtml(file.file_name)} • ${formatBytes(file.file_size)} ${file.isNew ? '<span style="color:#38bdf8">(Pending upload)</span>' : ''}</div>
+        </div>
+      </div>
+      <div class="doc-file-actions">
+        ${!file.isNew ? `
+          <button type="button" class="btn-icon" data-draft-action="preview" data-idx="${index}" title="Preview" aria-label="Preview file">
+            <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+          </button>
+        ` : ''}
+        <button type="button" class="btn-icon" data-draft-action="remove" data-idx="${index}" title="Remove file" aria-label="Remove file">
+          <svg class="ic ic-sm" style="color:var(--red)"><use href="#ic-trash"/></svg>
+        </button>
+      </div>
+    `;
+
+    container.appendChild(item);
+  });
+
+  container.querySelectorAll('[data-draft-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      const action = btn.dataset.draftAction;
+      if (action === 'remove') {
+        state.currentDocDraftFiles.splice(idx, 1);
+        renderDocDraftFiles();
+      } else if (action === 'preview') {
+        const file = state.currentDocDraftFiles[idx];
+        if (state.editingDocId && file.file_id) {
+          viewDocFile(state.editingDocId, file.file_id);
+        }
+      }
+    });
+  });
+}
+
+async function handleDocFilesSelected(fileList) {
+  if (!fileList || fileList.length === 0) return;
+
+  const docId = state.editingDocId || uuid();
+
+  for (let i = 0; i < fileList.length; i++) {
+    const file = fileList[i];
+    const buffer = await file.arrayBuffer();
+    const fileId = uuid();
+    const safeExt = file.name.split('.').pop() || 'bin';
+    const filePath = `docs/${docId}_${fileId.slice(0, 8)}.${safeExt}.enc`;
+
+    state.currentDocDraftFiles.push({
+      file_id: fileId,
+      label: file.name.replace(/\.[^/.]+$/, ''),
+      file_name: file.name,
+      file_type: file.type || 'application/octet-stream',
+      file_size: file.size,
+      file_path: filePath,
+      dataBuffer: buffer,
+      isNew: true,
+    });
+  }
+
+  renderDocDraftFiles();
+}
+
+async function saveDoc() {
+  const name        = document.getElementById('doc-name').value.trim();
+  const category    = document.getElementById('doc-category').value;
+  const number      = document.getElementById('doc-number').value.trim();
+  const holder_name = document.getElementById('doc-holder-name').value.trim();
+  const expiry_date = document.getElementById('doc-expiry-date').value;
+  const notes       = document.getElementById('doc-notes').value.trim();
+
+  if (!name) {
+    Toast.error('Document name is required.');
+    return;
+  }
+
+  const saveBtn = document.getElementById('modal-doc-save');
+  saveBtn.classList.add('btn-loading');
+  saveBtn.disabled = true;
+
+  try {
+    const now = new Date().toISOString();
+    const docId = state.editingDocId || uuid();
+
+    // 1. Commit any new attached files to GitHub under docs/
+    const finalFiles = [];
+
+    for (let f of state.currentDocDraftFiles) {
+      if (f.isNew && f.dataBuffer) {
+        setSyncStatus(`⏳ Encrypting & uploading ${f.file_name}…`);
+        const encBlob = await Crypto.encryptBinary(f.dataBuffer, state.vaultKey, state.vaultSalt);
+
+        const sha = await GitHub.commitVault({
+          content: encBlob,
+          sha:     null,
+          owner:   state.config.github_owner,
+          repo:    state.config.github_repo,
+          path:    f.file_path,
+          token:   state.vault.github_pat,
+        });
+
+        finalFiles.push({
+          file_id:   f.file_id,
+          label:     f.label,
+          file_name: f.file_name,
+          file_type: f.file_type,
+          file_size: f.file_size,
+          file_path: f.file_path,
+          sha:       sha,
+          created_at: now,
+        });
+      } else {
+        finalFiles.push({
+          file_id:   f.file_id,
+          label:     f.label,
+          file_name: f.file_name,
+          file_type: f.file_type,
+          file_size: f.file_size,
+          file_path: f.file_path,
+          sha:       f.sha,
+          created_at: f.created_at || now,
+        });
+      }
+    }
+
+    // 2. Detect removed files and delete them from GitHub
+    if (state.editingDocId) {
+      const existingDoc = state.vault?.docs?.find(d => d.id === state.editingDocId);
+      if (existingDoc && existingDoc.files) {
+        const remainingPaths = new Set(finalFiles.map(f => f.file_path));
+        for (let oldFile of existingDoc.files) {
+          if (!remainingPaths.has(oldFile.file_path) && oldFile.sha) {
+            try {
+              await GitHub.deleteFile({
+                path:  oldFile.file_path,
+                sha:   oldFile.sha,
+                owner: state.config.github_owner,
+                repo:  state.config.github_repo,
+                token: state.vault.github_pat,
+              });
+              delete _decryptedDocCache[oldFile.file_path];
+            } catch (err) {
+              console.warn('Could not delete old file from GitHub:', err);
+            }
+          }
+        }
+      }
+    }
+
+    if (!state.vault.docs) state.vault.docs = [];
+
+    if (state.editingDocId) {
+      const idx = state.vault.docs.findIndex(d => d.id === state.editingDocId);
+      if (idx !== -1) {
+        state.vault.docs[idx] = {
+          ...state.vault.docs[idx],
+          name, category, number, holder_name, expiry_date, notes,
+          files: finalFiles,
+          updated_at: now,
+        };
+      }
+    } else {
+      state.vault.docs.push({
+        id:          docId,
+        name, category, number, holder_name, expiry_date, notes,
+        files:       finalFiles,
+        created_at:  now,
+        updated_at:  now,
+      });
+    }
+
+    hideModal('modal-doc');
+    renderDocsList();
+    Toast.success('Document saved.');
+    await saveVault();
+
+  } catch (err) {
+    Toast.error(`Save failed: ${err.message}`);
+  } finally {
+    saveBtn.classList.remove('btn-loading');
+    saveBtn.disabled = false;
+  }
+}
+
+async function deleteDoc() {
+  if (!state.editingDocId) return;
+  if (!confirm('Delete this document and all its attached files? This cannot be undone.')) return;
+
+  const doc = state.vault?.docs?.find(d => d.id === state.editingDocId);
+  if (doc && doc.files) {
+    // Delete attached files from GitHub
+    for (let f of doc.files) {
+      if (f.file_path && f.sha) {
+        try {
+          await GitHub.deleteFile({
+            path:  f.file_path,
+            sha:   f.sha,
+            owner: state.config.github_owner,
+            repo:  state.config.github_repo,
+            token: state.vault.github_pat,
+          });
+          delete _decryptedDocCache[f.file_path];
+        } catch (err) {
+          console.warn('Could not delete file from GitHub:', err);
+        }
+      }
+    }
+  }
+
+  state.vault.docs = (state.vault.docs || []).filter(d => d.id !== state.editingDocId);
+  hideModal('modal-doc');
+  renderDocsList();
+  Toast.success('Document deleted.');
+  await saveVault();
+}
+
+async function viewDocFile(docId, fileId) {
+  const doc = state.vault?.docs?.find(d => d.id === docId);
+  if (!doc) return;
+  const file = doc.files?.find(f => f.file_id === fileId);
+  if (!file) return;
+
+  document.getElementById('viewer-title').textContent = doc.name;
+  document.getElementById('viewer-subtitle').textContent = `${file.label || file.file_name} • ${formatBytes(file.file_size)}`;
+
+  const spinner = document.getElementById('viewer-loading-spinner');
+  const container = document.getElementById('viewer-container');
+  container.innerHTML = '';
+  spinner.style.display = 'block';
+
+  showModal('modal-doc-viewer');
+
+  try {
+    let blobUrl = _decryptedDocCache[file.file_path];
+
+    if (!blobUrl) {
+      const { blob } = await GitHub.fetchFile(
+        state.config.github_owner,
+        state.config.github_repo,
+        file.file_path,
+        state.vault.github_pat
+      );
+
+      const decryptedBuffer = await Crypto.decryptBinary(blob, state.vaultKey);
+      const mimeType = file.file_type || 'application/octet-stream';
+      const fileBlob = new Blob([decryptedBuffer], { type: mimeType });
+      blobUrl = URL.createObjectURL(fileBlob);
+      _decryptedDocCache[file.file_path] = blobUrl;
+    }
+
+    spinner.style.display = 'none';
+
+    const isPdf = (file.file_type || '').includes('pdf') || (file.file_name || '').endsWith('.pdf');
+    if (isPdf) {
+      container.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;height:100%;width:100%">
+          <iframe src="${blobUrl}" style="width:100%;height:100%;border:none;border-radius:var(--r)"></iframe>
+        </div>
+      `;
+    } else {
+      container.innerHTML = `
+        <img src="${blobUrl}" alt="${escapeHtml(file.file_name)}" />
+      `;
+    }
+
+    // Set download button
+    const dlBtn = document.getElementById('viewer-download-btn');
+    dlBtn.onclick = () => {
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = file.file_name || `${doc.name}_${file.label || 'doc'}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    };
+
+  } catch (err) {
+    spinner.style.display = 'none';
+    container.innerHTML = `
+      <div style="color:var(--red);text-align:center;padding:20px">
+        Failed to decrypt file: ${escapeHtml(err.message)}
+      </div>
+    `;
+  }
+}
+
 // ─── GitHub Save ──────────────────────────────────────────────────────────────
 
 async function saveVault() {
@@ -1389,11 +1977,14 @@ function initEventListeners() {
   // ── Navigation Tabs ───────────────────────────────────────────────────────
   document.getElementById('tab-passwords-btn')?.addEventListener('click', () => switchVaultTab('passwords'));
   document.getElementById('tab-journal-btn')?.addEventListener('click', () => switchVaultTab('journal'));
+  document.getElementById('tab-docs-btn')?.addEventListener('click', () => switchVaultTab('docs'));
 
   // ── Vault screen ──────────────────────────────────────────────────────────
   document.getElementById('vault-add-btn')?.addEventListener('click', () => {
     if (state.activeTab === 'journal') {
       openNoteEditor(null);
+    } else if (state.activeTab === 'docs') {
+      openDocModal(null);
     } else {
       openAddModal();
     }
@@ -1402,6 +1993,8 @@ function initEventListeners() {
   document.getElementById('vault-fab-btn')?.addEventListener('click', () => {
     if (state.activeTab === 'journal') {
       openNoteEditor(null);
+    } else if (state.activeTab === 'docs') {
+      openDocModal(null);
     } else {
       openAddModal();
     }
@@ -1427,6 +2020,45 @@ function initEventListeners() {
     state.journalSearchQuery = '';
     renderJournalList();
   });
+
+  // ── Emergency Documents View & Search ─────────────────────────────────────
+  document.getElementById('docs-search')?.addEventListener('input', e => {
+    state.docSearchQuery = e.target.value;
+    renderDocsList();
+  });
+
+  document.querySelectorAll('#docs-category-pills .journal-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#docs-category-pills .journal-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      state.docCategoryFilter = pill.dataset.cat || 'all';
+      renderDocsList();
+    });
+  });
+
+  // ── Document Modal ────────────────────────────────────────────────────────
+  document.getElementById('modal-doc-close')?.addEventListener('click',  () => hideModal('modal-doc'));
+  document.getElementById('modal-doc-cancel')?.addEventListener('click', () => hideModal('modal-doc'));
+  document.getElementById('modal-doc-save')?.addEventListener('click',   saveDoc);
+  document.getElementById('modal-doc-delete')?.addEventListener('click', deleteDoc);
+
+  document.querySelectorAll('.doc-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => applyDocPreset(btn.dataset.preset));
+  });
+
+  document.getElementById('doc-add-file-btn')?.addEventListener('click', () => {
+    document.getElementById('doc-file-input')?.click();
+  });
+
+  document.getElementById('doc-file-input')?.addEventListener('change', async e => {
+    if (e.target.files?.length) {
+      await handleDocFilesSelected(e.target.files);
+      e.target.value = '';
+    }
+  });
+
+  // ── Document Viewer Modal ─────────────────────────────────────────────────
+  document.getElementById('modal-viewer-close')?.addEventListener('click', () => hideModal('modal-doc-viewer'));
 
   // ── Note Editor ───────────────────────────────────────────────────────────
   document.getElementById('note-back-btn')?.addEventListener('click', saveCurrentNote);
@@ -1500,6 +2132,8 @@ function initKeyboardShortcuts() {
         case 'a':
           if (state.activeTab === 'journal') {
             openNoteEditor(null);
+          } else if (state.activeTab === 'docs') {
+            openDocModal(null);
           } else {
             openAddModal();
           }
@@ -1518,7 +2152,7 @@ function initKeyboardShortcuts() {
         saveCurrentNote();
         return;
       }
-      ['modal-entry', 'modal-generator', 'modal-import'].forEach(id => {
+      ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer'].forEach(id => {
         const m = document.getElementById(id);
         if (m && m.classList.contains('visible')) hideModal(id);
       });

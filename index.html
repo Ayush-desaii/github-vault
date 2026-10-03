@@ -79,6 +79,18 @@
   <symbol id="ic-trash" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
     <path d="M2.5 4h11M5.5 4V2.5A1.5 1.5 0 0 1 7 1h2a1.5 1.5 0 0 1 1.5 1.5V4M12.5 4v9a1.5 1.5 0 0 1-1.5 1.5h-6A1.5 1.5 0 0 1 3.5 13V4"/>
   </symbol>
+  <symbol id="ic-doc" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M9 1H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5V5L9 1z"/>
+    <path d="M9 1v4h4"/>
+  </symbol>
+  <symbol id="ic-id-card" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
+    <circle cx="5" cy="7" r="1.5"/>
+    <path d="M3.5 11a1.5 1.5 0 0 1 3 0M8.5 6.5h4M8.5 9h2.5"/>
+  </symbol>
+  <symbol id="ic-download" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 2v9M4 8l4 4 4-4M2 13.5h12"/>
+  </symbol>
 </svg>
 
 <!-- helper: inline SVG icon -->
@@ -325,6 +337,10 @@
         <svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>
         <span>Journal</span>
       </button>
+      <button type="button" class="vault-nav-tab" id="tab-docs-btn">
+        <svg class="ic" style="color:#38bdf8"><use href="#ic-id-card"/></svg>
+        <span>Docs</span>
+      </button>
     </div>
     <div class="vault-actions">
       <button class="btn-icon" id="vault-add-btn" title="Add (A)">
@@ -370,6 +386,27 @@
     </div>
 
     <main id="journal-grid" class="journal-grid"></main>
+  </div>
+
+  <!-- ── Emergency Documents View ─────────────────────────────── -->
+  <div id="vault-view-docs" class="vault-tab-view hidden">
+    <div class="journal-search-wrap">
+      <div class="journal-filter-row" style="flex-wrap: wrap; gap: 8px;">
+        <div class="docs-filter-pills" id="docs-category-pills">
+          <button type="button" class="journal-pill active" data-cat="all">All</button>
+          <button type="button" class="journal-pill" data-cat="identity">Identity</button>
+          <button type="button" class="journal-pill" data-cat="signature">Signature</button>
+          <button type="button" class="journal-pill" data-cat="other">Other</button>
+        </div>
+        <span id="docs-count-badge" class="journal-counter">0 docs</span>
+      </div>
+      <div class="journal-input-wrap">
+        <svg class="ic search-icon"><use href="#ic-search"/></svg>
+        <input type="search" id="docs-search" placeholder="Search license, passport, PAN, numbers…" autocomplete="off" spellcheck="false" />
+      </div>
+    </div>
+
+    <main id="docs-grid" class="docs-grid"></main>
   </div>
 
   <!-- Mobile Floating Action Button (dynamically styled/routed) -->
@@ -460,6 +497,126 @@
         <button class="btn-secondary" id="modal-entry-cancel">Cancel</button>
         <button class="btn-primary"   id="modal-entry-save">Save</button>
       </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     MODAL — Add / Edit Emergency Document
+════════════════════════════════════════════════════════════════ -->
+<div id="modal-doc" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box modal-box-lg">
+    <div class="modal-handle-bar"></div>
+    <div class="modal-header">
+      <h2 id="modal-doc-title">Add Document</h2>
+      <button class="btn-icon" id="modal-doc-close">
+        <svg class="ic"><use href="#ic-close"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <!-- Quick Presets -->
+      <div class="doc-preset-row">
+        <span class="hint small" style="margin-bottom:4px;display:block">Quick Presets:</span>
+        <div class="doc-preset-chips">
+          <button type="button" class="doc-preset-btn" data-preset="pan">🪪 PAN Card</button>
+          <button type="button" class="doc-preset-btn" data-preset="dl">🚗 Driving License</button>
+          <button type="button" class="doc-preset-btn" data-preset="passport">🛂 Passport</button>
+          <button type="button" class="doc-preset-btn" data-preset="sign">✍️ Signature</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Document Name *</label>
+        <input type="text" id="doc-name" placeholder="e.g. Driving License, PAN Card, Passport" autocomplete="off" />
+      </div>
+
+      <div class="field-row-2">
+        <div class="field">
+          <label>Category</label>
+          <select id="doc-category" class="select-field">
+            <option value="identity">Identity / ID Card</option>
+            <option value="signature">Digital Signature</option>
+            <option value="travel">Travel / Passport</option>
+            <option value="finance">Financial / Tax</option>
+            <option value="other">Other / Certificate</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Document Number <span class="hint small">(For 1-tap copy)</span></label>
+          <input type="text" id="doc-number" placeholder="e.g. DL-1420110012345 or ABCDE1234F" autocomplete="off" spellcheck="false" style="font-family:var(--mono);" />
+        </div>
+      </div>
+
+      <div class="field-row-2">
+        <div class="field">
+          <label>Name on Document</label>
+          <input type="text" id="doc-holder-name" placeholder="Full name as printed on ID" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label>Expiry Date <span class="hint small">(Optional)</span></label>
+          <input type="date" id="doc-expiry-date" class="date-field" />
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="doc-notes" rows="2" placeholder="Issue authority, blood group, emergency contacts…"></textarea>
+      </div>
+
+      <!-- Attached Files Section (Approach B) -->
+      <div class="field">
+        <div class="doc-files-header">
+          <label style="margin-bottom:0">Attached Encrypted Files</label>
+          <button type="button" class="btn-secondary btn-sm" id="doc-add-file-btn">
+            <svg class="ic ic-sm"><use href="#ic-plus"/></svg>
+            <span>Add File / Photo / PDF</span>
+          </button>
+        </div>
+
+        <input type="file" id="doc-file-input" accept="image/*,.pdf" multiple style="display:none" />
+
+        <div id="doc-files-list" class="doc-files-list"></div>
+        <p class="hint small" style="margin-top:6px; color:var(--t3)">
+          Files are encrypted client-side with AES-256-GCM and stored separately in your repository under <code>docs/</code>.
+        </p>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn-danger hidden" id="modal-doc-delete">Delete</button>
+      <div class="modal-footer-right">
+        <button class="btn-secondary" id="modal-doc-cancel">Cancel</button>
+        <button class="btn-primary"   id="modal-doc-save">Save Document</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     MODAL — Document Viewer / Lightbox
+════════════════════════════════════════════════════════════════ -->
+<div id="modal-doc-viewer" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box modal-box-fullscreen">
+    <div class="modal-header">
+      <div class="viewer-header-info">
+        <h2 id="viewer-title">Document Preview</h2>
+        <span id="viewer-subtitle" class="hint small">Decrypted in memory</span>
+      </div>
+      <div class="viewer-actions">
+        <button type="button" class="btn-icon" id="viewer-download-btn" title="Download Decrypted Copy" aria-label="Download Decrypted Copy">
+          <svg class="ic"><use href="#ic-download"/></svg>
+        </button>
+        <button type="button" class="btn-icon" id="modal-viewer-close" title="Close" aria-label="Close">
+          <svg class="ic"><use href="#ic-close"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="modal-body viewer-body" id="viewer-content-body">
+      <div class="spinner" id="viewer-loading-spinner" style="display:none; margin: 40px auto;"></div>
+      <div id="viewer-container" class="viewer-container"></div>
     </div>
   </div>
 </div>

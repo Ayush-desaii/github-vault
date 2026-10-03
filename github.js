@@ -46,24 +46,58 @@ const GitHub = (() => {
   // ─── Public API ───────────────────────────────────────────────────────────
 
   /**
-   * Fetch the contents of vault.enc from GitHub.
-   * For public repos, no token is required.
+   * Fetch any file contents from GitHub.
+   * If the file is > 1MB, GitHub's contents endpoint provides download_url.
    *
    * @param {string} owner
    * @param {string} repo
-   * @param {string} path  e.g. 'vault.enc'
+   * @param {string} path  e.g. 'vault.enc' or 'docs/abc.enc'
    * @param {string} [token]  optional, required for private repos
    * @returns {Promise<{ blob: string, sha: string }>}
-   *   blob — base64-encoded encrypted vault content
-   *   sha  — GitHub file SHA needed for subsequent commits
    */
-  async function fetchVault(owner, repo, path, token = null) {
+  async function fetchFile(owner, repo, path, token = null) {
     const url  = `${API}/repos/${owner}/${repo}/contents/${path}`;
     const data = await request(url, { headers: authHeaders(token) });
 
-    // GitHub returns content as base64 with line breaks — strip them
-    const blob = data.content.replace(/\n/g, '');
-    return { blob, sha: data.sha };
+    if (data.content) {
+      const blob = data.content.replace(/\n/g, '');
+      return { blob, sha: data.sha };
+    }
+
+    if (data.download_url) {
+      const res = await fetch(data.download_url, { headers: authHeaders(token) });
+      const text = await res.text();
+      return { blob: text.trim().replace(/\n/g, ''), sha: data.sha };
+    }
+
+    throw new Error('Could not retrieve file content from GitHub');
+  }
+
+  async function fetchVault(owner, repo, path, token = null) {
+    return fetchFile(owner, repo, path, token);
+  }
+
+  /**
+   * Delete a file from GitHub repository.
+   *
+   * @param {object} opts
+   * @param {string} opts.path
+   * @param {string} opts.sha
+   * @param {string} opts.owner
+   * @param {string} opts.repo
+   * @param {string} opts.token
+   */
+  async function deleteFile({ path, sha, owner, repo, token }) {
+    const url  = `${API}/repos/${owner}/${repo}/contents/${path}`;
+    const body = {
+      message: `vault: delete ${path}`,
+      sha,
+    };
+    await request(url, {
+      method:  'DELETE',
+      headers: authHeaders(token),
+      body:    JSON.stringify(body),
+    });
   }
 
   /**
@@ -145,7 +179,9 @@ const GitHub = (() => {
 
   return {
     fetchVault,
+    fetchFile,
     commitVault,
+    deleteFile,
     validateAccess,
     checkVaultExists,
   };

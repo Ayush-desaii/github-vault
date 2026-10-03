@@ -154,6 +154,47 @@ const Crypto = (() => {
     return bytesToB64(out);
   }
 
+  /**
+   * Encrypt arbitrary binary data (Uint8Array or ArrayBuffer) using AES-256-GCM.
+   * Format: base64-encoded [16 bytes salt] [12 bytes IV] [ciphertext]
+   *
+   * @param {ArrayBuffer|Uint8Array} bufferOrUint8
+   * @param {CryptoKey}  key   in-memory vault key
+   * @param {Uint8Array} salt  vault salt
+   * @returns {Promise<string>} base64 blob
+   */
+  async function encryptBinary(bufferOrUint8, key, salt) {
+    const iv = randomBytes(IV_LEN);
+    const data = bufferOrUint8 instanceof Uint8Array ? bufferOrUint8 : new Uint8Array(bufferOrUint8);
+    const ciphertext = await crypto.subtle.encrypt({ name: AES_ALG, iv }, key, data);
+
+    const out = new Uint8Array(SALT_LEN + IV_LEN + ciphertext.byteLength);
+    out.set(salt, 0);
+    out.set(iv, SALT_LEN);
+    out.set(new Uint8Array(ciphertext), SALT_LEN + IV_LEN);
+
+    return bytesToB64(out);
+  }
+
+  /**
+   * Decrypt a base64 encrypted binary blob into an ArrayBuffer using the vault key.
+   *
+   * @param {string} b64blob
+   * @param {CryptoKey} key
+   * @returns {Promise<ArrayBuffer>} decrypted plaintext buffer
+   */
+  async function decryptBinary(b64blob, key) {
+    const bytes = b64ToBytes(b64blob);
+    const iv = bytes.slice(SALT_LEN, SALT_LEN + IV_LEN);
+    const ciphertext = bytes.slice(SALT_LEN + IV_LEN);
+
+    try {
+      return await crypto.subtle.decrypt({ name: AES_ALG, iv }, key, ciphertext);
+    } catch {
+      throw new Error('DECRYPT_FAILED');
+    }
+  }
+
   // ─── Quick-Unlock Key Wrapping ────────────────────────────────────────────
   //
   // After a full unlock the vault key lives in memory (state.vaultKey).
@@ -288,6 +329,8 @@ const Crypto = (() => {
     createVault,
     encryptVault,
     decryptVault,
+    encryptBinary,
+    decryptBinary,
     wrapKey,
     unwrapKey,
     generatePassword,
