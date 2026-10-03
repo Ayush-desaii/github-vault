@@ -337,10 +337,16 @@
 
   <div class="vault-search-wrap">
     <svg class="ic search-icon"><use href="#ic-search"/></svg>
-    <input type="search" id="vault-search" placeholder="Search…" />
+    <input type="search" id="vault-search" placeholder="Search passwords…" autocomplete="off" spellcheck="false" />
+    <span id="vault-count-badge" class="vault-count-badge">0 items</span>
   </div>
 
   <main id="vault-list" class="vault-list"></main>
+
+  <!-- Mobile Floating Action Button -->
+  <button class="btn-fab" id="vault-fab-btn" title="Add Password" aria-label="Add Password">
+    <svg class="ic-lg"><use href="#ic-plus"/></svg>
+  </button>
 
   <div class="sync-status" id="sync-status"></div>
 </div>
@@ -352,6 +358,7 @@
 <div id="modal-entry" class="modal hidden">
   <div class="modal-backdrop"></div>
   <div class="modal-box">
+    <div class="modal-handle-bar"></div>
     <div class="modal-header">
       <h2 id="modal-entry-title">Add password</h2>
       <button class="btn-icon" id="modal-entry-close">
@@ -405,6 +412,7 @@
 <div id="modal-generator" class="modal hidden">
   <div class="modal-backdrop"></div>
   <div class="modal-box modal-box-sm">
+    <div class="modal-handle-bar"></div>
     <div class="modal-header">
       <h2>Password generator</h2>
       <button class="btn-icon" id="modal-gen-close">
@@ -445,6 +453,7 @@
 <div id="modal-import" class="modal hidden">
   <div class="modal-backdrop"></div>
   <div class="modal-box">
+    <div class="modal-handle-bar"></div>
     <div class="modal-header">
       <h2>Import passwords</h2>
       <button class="btn-icon" id="modal-import-close">

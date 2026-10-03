@@ -65,7 +65,9 @@ function initPasswordToggles() {
     if (!input) return;
     const isHidden  = input.type === 'password';
     input.type      = isHidden ? 'text' : 'password';
-    btn.textContent = isHidden ? '🙈' : '👁';
+    btn.innerHTML   = isHidden
+      ? '<svg class="ic ic-sm"><use href="#ic-eye-off"/></svg>'
+      : '<svg class="ic ic-sm"><use href="#ic-eye"/></svg>';
   });
 }
 
@@ -96,9 +98,13 @@ class PinInput {
     this.numpadEl.innerHTML = '';
     keys.forEach(k => {
       const btn = document.createElement('button');
+      btn.type        = 'button';
       btn.className   = k === '' ? 'numpad-key numpad-empty' : 'numpad-key';
       btn.textContent = k;
       btn.disabled    = k === '';
+      if (k === '⌫') {
+        btn.setAttribute('aria-label', 'Backspace');
+      }
       if (k !== '') {
         btn.addEventListener('click', () => {
           if (k === '⌫') { this._backspace(); }
@@ -162,14 +168,26 @@ class PatternLock {
     this.curPos   = null;
     this.error    = false;
 
+    // Retina High-DPI setup for razor-sharp rendering on mobile
+    const dpr = window.devicePixelRatio || 1;
+    const w = 240;
+    const h = 240;
+    this.canvas.width = w * dpr;
+    this.canvas.height = h * dpr;
+    this.canvas.style.width = `${w}px`;
+    this.canvas.style.height = `${h}px`;
+    this.ctx.scale(dpr, dpr);
+    this.width = w;
+    this.height = h;
+
     this._buildDots();
     this._bind();
     this._draw();
   }
 
   _buildDots() {
-    const size    = this.canvas.width;
-    const padding = 38;
+    const size    = this.width;
+    const padding = 42;
     const gap     = (size - padding * 2) / 2;
     this.dots = [];
     for (let r = 0; r < 3; r++) {
@@ -199,13 +217,13 @@ class PatternLock {
 
   _getPos(e) {
     const r  = this.canvas.getBoundingClientRect();
-    const sx = this.canvas.width  / r.width;
-    const sy = this.canvas.height / r.height;
+    const sx = this.width / r.width;
+    const sy = this.height / r.height;
     return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
   }
 
   _hit(pos) {
-    return this.dots.find(d => Math.hypot(d.x - pos.x, d.y - pos.y) < 24);
+    return this.dots.find(d => Math.hypot(d.x - pos.x, d.y - pos.y) < 28);
   }
 
   _onStart(pos) {
@@ -238,8 +256,8 @@ class PatternLock {
 
   _draw() {
     const ctx    = this.ctx;
-    const W      = this.canvas.width;
-    const H      = this.canvas.height;
+    const W      = this.width;
+    const H      = this.height;
     const active = new Set(this.pattern);
 
     ctx.clearRect(0, 0, W, H);
@@ -247,8 +265,8 @@ class PatternLock {
     // Draw connection lines
     if (this.pattern.length > 0) {
       ctx.beginPath();
-      ctx.strokeStyle = this.error ? 'rgba(255,85,85,.5)' : 'rgba(255,255,255,.2)';
-      ctx.lineWidth   = 2;
+      ctx.strokeStyle = this.error ? 'rgba(255, 77, 79, 0.85)' : 'rgba(255, 255, 255, 0.7)';
+      ctx.lineWidth   = 3;
       ctx.lineJoin    = 'round';
       ctx.lineCap     = 'round';
 
@@ -267,27 +285,27 @@ class PatternLock {
     // Draw dots
     this.dots.forEach(dot => {
       const isActive = active.has(dot.idx);
-      const activeColor = this.error ? 'rgba(255,85,85,.9)' : 'rgba(255,255,255,.9)';
+      const activeColor = this.error ? '#ff4d4f' : '#ffffff';
 
       // Outer ring
       ctx.beginPath();
-      ctx.arc(dot.x, dot.y, 14, 0, Math.PI * 2);
-      ctx.strokeStyle = isActive ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.1)';
-      ctx.lineWidth   = 1;
+      ctx.arc(dot.x, dot.y, 16, 0, Math.PI * 2);
+      ctx.strokeStyle = isActive ? (this.error ? 'rgba(255,77,79,0.5)' : 'rgba(255,255,255,0.4)') : 'rgba(255,255,255,0.1)';
+      ctx.lineWidth   = 1.5;
       ctx.stroke();
 
-      // Fill when active
+      // Outer halo when active
       if (isActive) {
         ctx.beginPath();
-        ctx.arc(dot.x, dot.y, 14, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255,255,255,.05)';
+        ctx.arc(dot.x, dot.y, 16, 0, Math.PI * 2);
+        ctx.fillStyle = this.error ? 'rgba(255,77,79,0.12)' : 'rgba(255,255,255,0.1)';
         ctx.fill();
       }
 
       // Inner dot
       ctx.beginPath();
-      ctx.arc(dot.x, dot.y, isActive ? 5 : 3, 0, Math.PI * 2);
-      ctx.fillStyle = isActive ? activeColor : 'rgba(255,255,255,.2)';
+      ctx.arc(dot.x, dot.y, isActive ? 6 : 4, 0, Math.PI * 2);
+      ctx.fillStyle = isActive ? activeColor : 'rgba(255,255,255,0.25)';
       ctx.fill();
     });
   }

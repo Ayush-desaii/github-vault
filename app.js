@@ -907,9 +907,17 @@ function renderVaultList() {
 
   container.innerHTML = '';
 
+  // Update count badge
+  const countBadge = document.getElementById('vault-count-badge');
+  if (countBadge) {
+    const total = entries.length;
+    const shown = sorted.length;
+    countBadge.textContent = q ? `${shown} of ${total}` : `${total} item${total !== 1 ? 's' : ''}`;
+  }
+
   // SVG icon strings reused in each card
-  const svgCopy = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M2 11V2h9"/></svg>`;
-  const svgEdit = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m11 2 3 3-8 8H3v-3l8-8z"/></svg>`;
+  const svgCopy = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M2 11V2h9"/></svg>`;
+  const svgEdit = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 2 3 3-8 8H3v-3l8-8z"/></svg>`;
 
   sorted.forEach(entry => {
     const card = document.createElement('div');
@@ -925,15 +933,29 @@ function renderVaultList() {
         + `<span style="display:none;align-items:center;justify-content:center;width:100%;height:100%">${letter}</span>`
       : letter;
 
+    let cleanDomain = '';
+    if (entry.url) {
+      try {
+        cleanDomain = new URL(entry.url.startsWith('http') ? entry.url : `https://${entry.url}`).hostname.replace(/^www\./, '');
+      } catch {
+        cleanDomain = entry.url;
+      }
+    }
+
+    const domainDisplay = cleanDomain ? `<span class="entry-url">${escapeHtml(cleanDomain)}</span>` : '';
+
     card.innerHTML = `
       <div class="entry-icon">${iconContent}</div>
       <div class="entry-info">
-        <div class="entry-name">${escapeHtml(entry.name)}</div>
+        <div class="entry-name-row">
+          <span class="entry-name">${escapeHtml(entry.name)}</span>
+          ${domainDisplay}
+        </div>
         <div class="entry-username">${escapeHtml(entry.username)}</div>
       </div>
       <div class="entry-actions">
-        <button class="btn-icon" data-action="copy" data-id="${entry.id}" title="Copy password">${svgCopy}</button>
-        <button class="btn-icon" data-action="edit" data-id="${entry.id}" title="Edit">${svgEdit}</button>
+        <button class="btn-icon" data-action="copy" data-id="${entry.id}" title="Copy password" aria-label="Copy password">${svgCopy}</button>
+        <button class="btn-icon" data-action="edit" data-id="${entry.id}" title="Edit" aria-label="Edit entry">${svgEdit}</button>
       </div>
     `;
 
@@ -949,20 +971,31 @@ function renderVaultList() {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const { action, id } = btn.dataset;
-      if (action === 'copy') copyPassword(id);
+      if (action === 'copy') copyPassword(id, btn);
       if (action === 'edit') openEditModal(id);
     });
   });
 }
 
 function findEntry(id) {
-  return state.vault.entries.find(e => e.id === id);
+  return state.vault?.entries?.find(e => e.id === id);
 }
 
-async function copyPassword(entryId) {
+async function copyPassword(entryId, btnElement = null) {
   const entry = findEntry(entryId);
   if (!entry) return;
   await Clipboard.copy(entry.password, `Password for ${entry.name} copied!`);
+
+  // Instant checkmark micro-interaction
+  if (btnElement) {
+    const origHtml = btnElement.innerHTML;
+    btnElement.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8l4.5 4.5L14 4"/></svg>`;
+    btnElement.style.color = '#22c55e';
+    setTimeout(() => {
+      btnElement.innerHTML = origHtml;
+      btnElement.style.color = '';
+    }, 1500);
+  }
 }
 
 // ─── Add / Edit Modal ─────────────────────────────────────────────────────────
@@ -1111,9 +1144,10 @@ function regeneratePassword() {
 function initEventListeners() {
 
   // ── Vault screen ──────────────────────────────────────────────────────────
-  document.getElementById('vault-add-btn').addEventListener('click', openAddModal);
-  document.getElementById('vault-gen-btn').addEventListener('click', openGeneratorModal);
-  document.getElementById('vault-lock-btn').addEventListener('click', lockVault);
+  document.getElementById('vault-add-btn')?.addEventListener('click', openAddModal);
+  document.getElementById('vault-fab-btn')?.addEventListener('click', openAddModal);
+  document.getElementById('vault-gen-btn')?.addEventListener('click', openGeneratorModal);
+  document.getElementById('vault-lock-btn')?.addEventListener('click', lockVault);
 
   document.getElementById('vault-search').addEventListener('input', e => {
     state.searchQuery = e.target.value;
