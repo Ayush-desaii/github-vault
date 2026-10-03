@@ -614,13 +614,7 @@ function initSetupWizard() {
   // ── Step 4: Done ─────────────────────────────────────────────────────────
 
 function renderActiveTab() {
-  if (state.activeTab === 'journal') {
-    renderJournalList();
-  } else if (state.activeTab === 'docs') {
-    renderDocsList();
-  } else {
-    renderVaultList();
-  }
+  switchVaultTab(state.activeTab || 'passwords');
 }
 
   document.getElementById('setup-done-btn').addEventListener('click', () => {
@@ -938,6 +932,15 @@ function renderVaultList() {
     new Date(b.updated_at) - new Date(a.updated_at)
   );
 
+  // Update count badge & bottom nav badge
+  const countBadge = document.getElementById('vault-count-badge');
+  if (countBadge) {
+    const total = entries.length;
+    const shown = sorted.length;
+    countBadge.textContent = q ? `${shown} of ${total}` : `${total} item${total !== 1 ? 's' : ''}`;
+  }
+  updateNavBadges();
+
   if (sorted.length === 0) {
     container.innerHTML = `
       <div class="vault-empty">
@@ -956,14 +959,6 @@ function renderVaultList() {
   }
 
   container.innerHTML = '';
-
-  // Update count badge
-  const countBadge = document.getElementById('vault-count-badge');
-  if (countBadge) {
-    const total = entries.length;
-    const shown = sorted.length;
-    countBadge.textContent = q ? `${shown} of ${total}` : `${total} item${total !== 1 ? 's' : ''}`;
-  }
 
   // SVG icon strings reused in each card
   const svgCopy = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M2 11V2h9"/></svg>`;
@@ -1134,18 +1129,21 @@ async function deleteEntry() {
 
 function switchVaultTab(tab) {
   state.activeTab = tab;
-  const pwTabBtn   = document.getElementById('tab-passwords-btn');
-  const jrnTabBtn  = document.getElementById('tab-journal-btn');
-  const docsTabBtn = document.getElementById('tab-docs-btn');
+
+  // Sync active classes across all tab buttons (both desktop top pills and mobile bottom bar)
+  document.querySelectorAll('.vault-nav-tab, .vault-bottom-tab').forEach(el => {
+    const tabName = el.getAttribute('data-tab');
+    if (tabName === tab || el.id === `tab-${tab}-btn` || el.id === `bottom-tab-${tab}`) {
+      el.classList.add('active');
+    } else {
+      el.classList.remove('active');
+    }
+  });
 
   const pwView   = document.getElementById('vault-view-passwords');
   const jrnView  = document.getElementById('vault-view-journal');
   const docsView = document.getElementById('vault-view-docs');
   const fab      = document.getElementById('vault-fab-btn');
-
-  pwTabBtn?.classList.remove('active');
-  jrnTabBtn?.classList.remove('active');
-  docsTabBtn?.classList.remove('active');
 
   pwView?.classList.add('hidden');
   jrnView?.classList.add('hidden');
@@ -1153,21 +1151,56 @@ function switchVaultTab(tab) {
 
   fab?.classList.remove('fab-journal', 'fab-docs');
 
+  const brandTitle = document.getElementById('vault-brand-title');
+  const brandIcon  = document.getElementById('vault-brand-icon');
+
   if (tab === 'journal') {
-    jrnTabBtn?.classList.add('active');
     jrnView?.classList.remove('hidden');
     fab?.classList.add('fab-journal');
+    if (brandTitle) brandTitle.textContent = 'Journal';
+    if (brandIcon) brandIcon.innerHTML = `<svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>`;
     renderJournalList();
+    const grid = document.getElementById('journal-grid');
+    if (grid) grid.scrollTop = 0;
   } else if (tab === 'docs') {
-    docsTabBtn?.classList.add('active');
     docsView?.classList.remove('hidden');
     fab?.classList.add('fab-docs');
+    if (brandTitle) brandTitle.textContent = 'Docs';
+    if (brandIcon) brandIcon.innerHTML = `<svg class="ic" style="color:#38bdf8"><use href="#ic-id-card"/></svg>`;
     renderDocsList();
+    const grid = document.getElementById('docs-grid');
+    if (grid) grid.scrollTop = 0;
   } else {
-    pwTabBtn?.classList.add('active');
     pwView?.classList.remove('hidden');
+    if (brandTitle) brandTitle.textContent = 'Passwords';
+    if (brandIcon) brandIcon.innerHTML = `<svg class="ic"><use href="#ic-key"/></svg>`;
     renderVaultList();
+    const list = document.getElementById('vault-list');
+    if (list) list.scrollTop = 0;
   }
+
+  updateNavBadges();
+}
+
+function updateNavBadges() {
+  const pwCount  = state.vault?.entries?.length || 0;
+  const jrnCount = state.vault?.notes?.length || 0;
+  const docCount = state.vault?.docs?.length || 0;
+
+  const updateBadge = (id, count) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (count > 0) {
+      el.textContent = count > 99 ? '99+' : count;
+      el.style.display = 'inline-flex';
+    } else {
+      el.style.display = 'none';
+    }
+  };
+
+  updateBadge('bottom-badge-passwords', pwCount);
+  updateBadge('bottom-badge-journal',   jrnCount);
+  updateBadge('bottom-badge-docs',      docCount);
 }
 
 function formatJournalCardDate(isoString) {
@@ -1227,6 +1260,7 @@ function renderJournalList() {
     const shown = sorted.length;
     countBadge.textContent = q ? `${shown} of ${total}` : `${total} note${total !== 1 ? 's' : ''}`;
   }
+  updateNavBadges();
 
   if (sorted.length === 0) {
     container.innerHTML = `
@@ -1428,6 +1462,7 @@ function renderDocsList() {
     const shown = sorted.length;
     countBadge.textContent = q || cat !== 'all' ? `${shown} of ${total}` : `${total} doc${total !== 1 ? 's' : ''}`;
   }
+  updateNavBadges();
 
   if (sorted.length === 0) {
     container.innerHTML = `
@@ -2017,10 +2052,19 @@ function regeneratePassword() {
 
 function initEventListeners() {
 
-  // ── Navigation Tabs ───────────────────────────────────────────────────────
+  // ── Navigation Tabs (Desktop pills & Mobile bottom dock) ───────────────────
+  document.querySelectorAll('[data-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.getAttribute('data-tab');
+      if (tab) switchVaultTab(tab);
+    });
+  });
   document.getElementById('tab-passwords-btn')?.addEventListener('click', () => switchVaultTab('passwords'));
   document.getElementById('tab-journal-btn')?.addEventListener('click', () => switchVaultTab('journal'));
   document.getElementById('tab-docs-btn')?.addEventListener('click', () => switchVaultTab('docs'));
+  document.getElementById('bottom-tab-passwords')?.addEventListener('click', () => switchVaultTab('passwords'));
+  document.getElementById('bottom-tab-journal')?.addEventListener('click', () => switchVaultTab('journal'));
+  document.getElementById('bottom-tab-docs')?.addEventListener('click', () => switchVaultTab('docs'));
 
   // ── Vault screen ──────────────────────────────────────────────────────────
   document.getElementById('vault-add-btn')?.addEventListener('click', () => {

@@ -328,16 +328,25 @@
 <div id="screen-vault" class="screen">
 
   <header class="vault-header">
+    <div class="vault-brand" id="vault-brand">
+      <div class="vault-brand-icon" id="vault-brand-icon">
+        <svg class="ic"><use href="#ic-key"/></svg>
+      </div>
+      <div class="vault-brand-text">
+        <span class="vault-brand-title" id="vault-brand-title">Passwords</span>
+      </div>
+    </div>
+
     <div class="vault-nav-tabs">
-      <button type="button" class="vault-nav-tab active" id="tab-passwords-btn">
+      <button type="button" class="vault-nav-tab active" data-tab="passwords" id="tab-passwords-btn">
         <svg class="ic"><use href="#ic-key"/></svg>
         <span>Passwords</span>
       </button>
-      <button type="button" class="vault-nav-tab" id="tab-journal-btn">
+      <button type="button" class="vault-nav-tab" data-tab="journal" id="tab-journal-btn">
         <svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>
         <span>Journal</span>
       </button>
-      <button type="button" class="vault-nav-tab" id="tab-docs-btn">
+      <button type="button" class="vault-nav-tab" data-tab="docs" id="tab-docs-btn">
         <svg class="ic" style="color:#38bdf8"><use href="#ic-id-card"/></svg>
         <span>Docs</span>
       </button>
@@ -415,6 +424,31 @@
   </button>
 
   <div class="sync-status" id="sync-status"></div>
+
+  <!-- Mobile Bottom Navigation Bar (Dock) -->
+  <nav class="vault-bottom-nav" id="vault-bottom-nav" aria-label="Main Navigation">
+    <button type="button" class="vault-bottom-tab active" data-tab="passwords" id="bottom-tab-passwords" aria-label="Passwords">
+      <div class="bottom-tab-icon-wrap">
+        <svg class="ic"><use href="#ic-key"/></svg>
+        <span class="bottom-tab-badge" id="bottom-badge-passwords" style="display:none">0</span>
+      </div>
+      <span class="bottom-tab-label">Passwords</span>
+    </button>
+    <button type="button" class="vault-bottom-tab" data-tab="journal" id="bottom-tab-journal" aria-label="Journal">
+      <div class="bottom-tab-icon-wrap">
+        <svg class="ic" style="color:#f59e0b"><use href="#ic-note"/></svg>
+        <span class="bottom-tab-badge" id="bottom-badge-journal" style="display:none">0</span>
+      </div>
+      <span class="bottom-tab-label">Journal</span>
+    </button>
+    <button type="button" class="vault-bottom-tab" data-tab="docs" id="bottom-tab-docs" aria-label="Docs">
+      <div class="bottom-tab-icon-wrap">
+        <svg class="ic" style="color:#38bdf8"><use href="#ic-id-card"/></svg>
+        <span class="bottom-tab-badge" id="bottom-badge-docs" style="display:none">0</span>
+      </div>
+      <span class="bottom-tab-label">Docs</span>
+    </button>
+  </nav>
 </div>
 
 
