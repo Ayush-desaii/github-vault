@@ -119,6 +119,20 @@
     <path d="M1.5 6 8 2.5 14.5 6"/>
     <path d="M3 6v6M6.3 6v6M9.7 6v6M13 6v6M1.5 12h13M1 14h14"/>
   </symbol>
+  <symbol id="ic-history" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1.5 8a6.5 6.5 0 1 1 2 4.6L1.5 10.5"/>
+    <path d="M1.5 14.5v-4h4"/>
+    <path d="M8 4.5v4l2.5 1.5"/>
+  </symbol>
+  <symbol id="ic-git-commit" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="8" cy="8" r="2.8"/>
+    <path d="M1.5 8h3.7M10.8 8h3.7"/>
+  </symbol>
+  <symbol id="ic-archive" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="1.5" y="2" width="13" height="3" rx="0.5"/>
+    <path d="M2.5 5v8.5a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V5"/>
+    <path d="M6.5 8h3"/>
+  </symbol>
 </svg>
 
 <!-- helper: inline SVG icon -->
@@ -403,6 +417,9 @@
       </button>
       <button class="btn-icon" id="vault-import-btn" title="Import from Google CSV (I)">
         <svg class="ic"><use href="#ic-upload"/></svg>
+      </button>
+      <button class="btn-icon" id="vault-history-btn" title="Version History & Rollback (H)">
+        <svg class="ic"><use href="#ic-history"/></svg>
       </button>
       <button class="btn-icon" id="vault-settings-btn" title="Security & Settings">
         <svg class="ic"><use href="#ic-settings"/></svg>
@@ -1123,6 +1140,122 @@
         </div>
       </div>
 
+      <!-- 1-Click Backup & Cold Storage Card -->
+      <div class="settings-card">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          <div class="settings-icon-badge" style="background:rgba(16, 185, 129, 0.14);color:#10b981;">
+            <svg class="ic-lg" style="width:20px;height:20px;"><use href="#ic-archive"/></svg>
+          </div>
+          <div style="flex:1;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+              <span style="font-weight:600;font-size:15px;color:var(--w);">1-Click Backup & Recovery</span>
+              <span class="settings-pill" style="background:rgba(16,185,129,0.15);color:#10b981;border-color:rgba(16,185,129,0.3);">Cold Storage</span>
+            </div>
+            <p class="hint" style="font-size:12.5px;margin-bottom:12px;line-height:1.45;">
+              Download an instant encrypted backup (.enc) for cold recovery, export decrypted JSON, or restore from an existing backup file.
+            </p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              <button type="button" class="btn-primary btn-sm" id="settings-backup-enc-btn" style="background:linear-gradient(135deg, #059669, #10b981);border:none;">
+                <svg class="ic ic-sm"><use href="#ic-download"/></svg>
+                <span>Download Encrypted (.enc)</span>
+              </button>
+              <button type="button" class="btn-secondary btn-sm" id="settings-export-json-btn">
+                <svg class="ic ic-sm"><use href="#ic-doc"/></svg>
+                <span>Export Decrypted (.json)</span>
+              </button>
+              <button type="button" class="btn-secondary btn-sm" id="settings-restore-file-btn">
+                <svg class="ic ic-sm"><use href="#ic-upload"/></svg>
+                <span>Restore Backup File</span>
+              </button>
+            </div>
+            <input type="file" id="backup-file-input" accept=".enc,.json" style="display:none;" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Version History & Rollback Card -->
+      <div class="settings-card">
+        <div style="display:flex;align-items:flex-start;gap:12px;">
+          <div class="settings-icon-badge" style="background:rgba(168, 85, 247, 0.14);color:#a855f7;">
+            <svg class="ic-lg" style="width:20px;height:20px;"><use href="#ic-history"/></svg>
+          </div>
+          <div style="flex:1;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+              <span style="font-weight:600;font-size:15px;color:var(--w);">Git Version History & Rollback</span>
+              <span class="settings-pill" style="background:rgba(168,85,247,0.15);color:#c084fc;border-color:rgba(168,85,247,0.3);">Time Machine</span>
+            </div>
+            <p class="hint" style="font-size:12.5px;margin-bottom:12px;line-height:1.45;">
+              Every vault change creates an encrypted commit on GitHub. Browse snapshots, preview contents, and rollback anytime.
+            </p>
+            <div>
+              <button type="button" class="btn-primary btn-sm" id="settings-open-history-btn" style="background:linear-gradient(135deg, #7c3aed, #a855f7);border:none;">
+                <svg class="ic ic-sm"><use href="#ic-history"/></svg>
+                <span>View Revision History & Rollback</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ── Git Version History & Rollback Modal (Time Machine) ── -->
+<div id="modal-history" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box modal-history-box">
+    <div class="modal-handle-bar"></div>
+    <div class="modal-header">
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <h2 style="margin:0;font-size:18px;">Git Version History</h2>
+          <span class="settings-pill" style="background:rgba(168,85,247,0.15);color:#c084fc;border-color:rgba(168,85,247,0.3);font-size:10.5px;">Time Machine</span>
+        </div>
+        <p class="hint small" style="margin:0;font-size:11.5px;">
+          Connected Repo: <code id="history-repo-label" style="color:var(--w);font-size:11px;"></code>
+        </p>
+      </div>
+      <button type="button" class="btn-icon" id="modal-history-close" title="Close" aria-label="Close">
+        <svg class="ic"><use href="#ic-close"/></svg>
+      </button>
+    </div>
+
+    <div class="modal-body history-modal-body">
+      <div class="history-top-bar">
+        <span class="history-top-meta" id="history-status-meta">Fetching snapshots from GitHub…</span>
+        <button type="button" class="btn-secondary btn-sm" id="history-refresh-btn" title="Refresh commit history">
+          <svg class="ic ic-sm"><use href="#ic-refresh"/></svg>
+          <span>Refresh</span>
+        </button>
+      </div>
+
+      <div class="history-layout">
+        <!-- Left: Commit Timeline List -->
+        <div class="history-timeline-panel">
+          <div class="history-timeline-scroll" id="history-timeline-list">
+            <div class="history-loading-wrap">
+              <div class="spinner"></div>
+              <p class="hint small" style="margin-top:8px;">Connecting to GitHub API…</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Snapshot Inspector Panel -->
+        <div class="history-inspector-panel" id="history-inspector-panel">
+          <div class="history-inspector-placeholder" id="history-empty-placeholder">
+            <svg class="ic-lg" style="width:36px;height:36px;color:var(--t3);margin-bottom:8px;"><use href="#ic-history"/></svg>
+            <div style="font-size:14px;font-weight:600;color:var(--w);margin-bottom:4px;">Select a Snapshot</div>
+            <p class="hint small" style="text-align:center;max-width:240px;line-height:1.4;">
+              Select any snapshot on the left to decrypt and inspect its contents, and rollback your vault if needed.
+            </p>
+          </div>
+
+          <div class="history-inspector-content hidden" id="history-content-view">
+            <!-- Dynamically populated snapshot preview & rollback button -->
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

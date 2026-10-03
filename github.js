@@ -107,15 +107,15 @@ const GitHub = (() => {
    * @param {string} opts.content  base64-encoded encrypted vault blob
    * @param {string} opts.sha      current file SHA (null if creating for the first time)
    * @param {string} opts.owner
-   * @param {string} opts.repo
-   * @param {string} opts.path
+    * @param {string} opts.path
    * @param {string} opts.token    GitHub PAT with Contents:write permission
+   * @param {string} [opts.message] Optional commit message
    * @returns {Promise<string>} new SHA of the committed file
    */
-  async function commitVault({ content, sha, owner, repo, path, token }) {
+  async function commitVault({ content, sha, owner, repo, path, token, message }) {
     const url  = `${API}/repos/${owner}/${repo}/contents/${path}`;
     const body = {
-      message: `vault: update ${new Date().toISOString()}`,
+      message: message || `vault: update ${new Date().toISOString()}`,
       content,                   // GitHub expects base64 content
       ...(sha ? { sha } : {}),   // include sha when updating existing file
     };
@@ -127,6 +127,50 @@ const GitHub = (() => {
     });
 
     return data.content.sha;
+  }
+
+  /**
+   * Fetch commit history for a specific file.
+   *
+   * @param {string} owner
+   * @param {string} repo
+   * @param {string} path   e.g. 'vault.enc'
+   * @param {string} [token] optional GitHub PAT
+   * @param {number} [limit=30] max commits to fetch
+   * @returns {Promise<Array<{ sha: string, commit: object, html_url: string }>>}
+   */
+  async function fetchCommitHistory(owner, repo, path = 'vault.enc', token = null, limit = 30) {
+    const url  = `${API}/repos/${owner}/${repo}/commits?path=${encodeURIComponent(path)}&per_page=${limit}`;
+    const list = await request(url, { headers: authHeaders(token) });
+    return Array.isArray(list) ? list : [];
+  }
+
+  /**
+   * Fetch file content from GitHub at a specific commit SHA or Git ref.
+   *
+   * @param {string} owner
+   * @param {string} repo
+   * @param {string} path
+   * @param {string} commitSha
+   * @param {string} [token]
+   * @returns {Promise<{ blob: string, sha: string }>}
+   */
+  async function fetchFileAtCommit(owner, repo, path, commitSha, token = null) {
+    const url  = `${API}/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(commitSha)}`;
+    const data = await request(url, { headers: authHeaders(token) });
+
+    if (data.content) {
+      const blob = data.content.replace(/\n/g, '');
+      return { blob, sha: data.sha };
+    }
+
+    if (data.download_url) {
+      const res = await fetch(data.download_url, { headers: authHeaders(token) });
+      const text = await res.text();
+      return { blob: text.trim().replace(/\n/g, ''), sha: data.sha };
+    }
+
+    throw new Error(`Could not retrieve file content at commit ${commitSha}`);
   }
 
   /**
@@ -180,6 +224,8 @@ const GitHub = (() => {
   return {
     fetchVault,
     fetchFile,
+    fetchCommitHistory,
+    fetchFileAtCommit,
     commitVault,
     deleteFile,
     validateAccess,

@@ -924,7 +924,7 @@ function lockVault() {
   stopTotpTicker();
 
   // Hide all modals so orphaned dialogs don't stay visible on locked screen
-  ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer', 'modal-settings', 'modal-card'].forEach(id => {
+  ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer', 'modal-settings', 'modal-card', 'modal-history'].forEach(id => {
     hideModal(id);
   });
 
@@ -2815,7 +2815,7 @@ function renderCardsList() {
 
 // ─── GitHub Save ──────────────────────────────────────────────────────────────
 
-async function saveVault() {
+async function saveVault(customMsg = null) {
   setSyncStatus('⏳ Saving…');
 
   try {
@@ -2830,6 +2830,7 @@ async function saveVault() {
       repo:    state.config.github_repo,
       path:    state.config.github_path || 'vault.enc',
       token:   state.vault.github_pat,
+      message: customMsg || undefined,
     });
 
     state.vaultSha  = newSha;
@@ -3039,6 +3040,595 @@ async function handleToggleBiometrics() {
   }
 }
 
+// ─── Backup & Cold Storage ──────────────────────────────────────────────────
+
+async function exportEncryptedBackup() {
+  if (!state.vault) {
+    Toast.error('Vault is locked.');
+    return;
+  }
+  try {
+    let blob = state.vaultBlob;
+    if (!blob) {
+      blob = await Crypto.encryptVault(state.vault, state.vaultKey, state.vaultSalt);
+      state.vaultBlob = blob;
+    }
+    const today = new Date().toISOString().slice(0, 10);
+    const filename = `vault-backup-${today}.enc`;
+    const file = new Blob([blob], { type: 'application/octet-stream' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    Toast.success('Encrypted backup downloaded! Store safely for cold recovery.');
+  } catch (err) {
+    Toast.error(`Backup failed: ${err.message}`);
+  }
+}
+
+function exportDecryptedJson() {
+  if (!state.vault) {
+    Toast.error('Vault is locked.');
+    return;
+  }
+
+  const confirmMsg =
+    '⚠️ SECURITY WARNING:\n\n' +
+    'You are about to export your entire vault as an UNENCRYPTED plain text JSON file.\n\n' +
+    'Anyone who gains access to this file will be able to see all your passwords, credit cards, bank accounts, and notes.\n\n' +
+    'Do you want to proceed?';
+
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const exportData = JSON.parse(JSON.stringify(state.vault));
+    const jsonStr = JSON.stringify(exportData, null, 2);
+    const today = new Date().toISOString().slice(0, 10);
+    const filename = `vault-export-${today}.json`;
+    const file = new Blob([jsonStr], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(file);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+    Toast.success('Decrypted JSON exported. Keep this file confidential!');
+  } catch (err) {
+    Toast.error(`Export failed: ${err.message}`);
+  }
+}
+
+async function decryptSnapshotBlob(blob) {
+  try {
+    const bytes = Uint8Array.from(atob(blob), c => c.charCodeAt(0));
+    const salt  = bytes.slice(0, 16);
+    const iv    = bytes.slice(16, 28);
+    const ct    = bytes.slice(28);
+
+    let sameSalt = true;
+    if (state.vaultSalt) {
+      for (let i = 0; i < 16; i++) {
+        if (salt[i] !== state.vaultSalt[i]) {
+          sameSalt = false;
+          break;
+        }
+      }
+    } else {
+      sameSalt = false;
+    }
+
+    if (sameSalt && state.vaultKey) {
+      try {
+        const ptBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, state.vaultKey, ct);
+        const data = JSON.parse(new TextDecoder().decode(ptBuf));
+        return data;
+      } catch {
+        // Fall through
+      }
+    }
+
+    if (state.masterSecret) {
+      const { data } = await Crypto.decryptVault(blob, state.masterSecret);
+      return data;
+    }
+  } catch {
+    // If masterSecret didn't work or failed
+  }
+
+  throw new Error('DECRYPT_FAILED');
+}
+
+async function handleBackupFileImport(event) {
+  const file = event.target?.files?.[0];
+  if (!file) return;
+  event.target.value = ''; // Reset file input
+
+  try {
+    const text = (await file.text()).trim();
+    let restoredVault = null;
+
+    if (file.name.endsWith('.json') || text.startsWith('{')) {
+      // JSON format
+      try {
+        restoredVault = JSON.parse(text);
+      } catch {
+        throw new Error('Invalid JSON file format.');
+      }
+    } else {
+      // Encrypted .enc format
+      try {
+        restoredVault = await decryptSnapshotBlob(text);
+      } catch {
+        const pw = prompt('Could not decrypt with active key. Enter Master Password used for this backup:');
+        if (!pw) return;
+        try {
+          const { data } = await Crypto.decryptVault(text, pw);
+          restoredVault = data;
+        } catch {
+          const pin = prompt('If this backup used PIN/pattern quick unlock, enter PIN/pattern:');
+          if (!pin) throw new Error('Decryption failed. Incorrect password.');
+          const { data } = await Crypto.decryptVault(text, pw + '\x00' + pin);
+          restoredVault = data;
+        }
+      }
+    }
+
+    if (!restoredVault || typeof restoredVault !== 'object') {
+      throw new Error('Invalid vault contents.');
+    }
+
+    const passwordsCount = restoredVault.entries?.length || 0;
+    const cardsCount = restoredVault.cards?.length || 0;
+    const notesCount = (restoredVault.journal_notes?.length || restoredVault.notes?.length) || 0;
+    const docsCount = (restoredVault.documents?.length || restoredVault.docs?.length) || 0;
+
+    const confirmMsg =
+      `Found backup (${file.name}):\n\n` +
+      `• ${passwordsCount} Passwords\n` +
+      `• ${cardsCount} Cards & Accounts\n` +
+      `• ${notesCount} Notes\n` +
+      `• ${docsCount} Documents\n\n` +
+      `Do you want to restore this backup? This will replace your current active vault and push a commit to GitHub.`;
+
+    if (!confirm(confirmMsg)) return;
+
+    if (!restoredVault.entries) restoredVault.entries = [];
+    if (!restoredVault.cards)   restoredVault.cards   = [];
+    if (!restoredVault.notes)   restoredVault.notes   = restoredVault.journal_notes || [];
+    if (!restoredVault.docs)    restoredVault.docs    = restoredVault.documents || [];
+    if (!restoredVault.github_pat && state.vault?.github_pat) {
+      restoredVault.github_pat = state.vault.github_pat;
+    }
+
+    state.vault = restoredVault;
+    await saveVault(`vault: restore from backup file (${file.name})`);
+    renderActiveTab();
+    hideModal('modal-settings');
+    Toast.success('Vault successfully restored from local backup!');
+  } catch (err) {
+    Toast.error(`Restore failed: ${err.message}`);
+  }
+}
+
+// ─── Git Version History & Rollback (Time Machine) ───────────────────────────
+
+const historyState = {
+  commits: [],
+  selectedSha: null,
+  cachedSnapshots: new Map(),
+};
+
+function formatRelativeTime(date) {
+  const now = new Date();
+  const diffSec = Math.floor((now - date) / 1000);
+  if (diffSec < 60) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatFullDateTime(date) {
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function openHistoryModal() {
+  if (!state.vault) {
+    Toast.error('Vault is locked.');
+    return;
+  }
+
+  const repoLabel = document.getElementById('history-repo-label');
+  if (repoLabel) {
+    repoLabel.textContent = `${state.config?.github_owner || ''}/${state.config?.github_repo || 'vault'}`;
+  }
+
+  showModal('modal-history');
+  loadCommitHistory();
+}
+
+async function loadCommitHistory() {
+  const metaEl = document.getElementById('history-status-meta');
+  const listEl = document.getElementById('history-timeline-list');
+  const emptyEl = document.getElementById('history-empty-placeholder');
+  const viewEl = document.getElementById('history-content-view');
+
+  if (metaEl) metaEl.textContent = 'Fetching snapshots from GitHub…';
+  if (listEl) {
+    listEl.innerHTML = `
+      <div class="history-loading-wrap">
+        <div class="spinner"></div>
+        <p class="hint small" style="margin-top:8px;">Connecting to GitHub API…</p>
+      </div>
+    `;
+  }
+  if (emptyEl) {
+    emptyEl.classList.remove('hidden');
+    emptyEl.innerHTML = `
+      <svg class="ic-lg" style="width:36px;height:36px;color:var(--t3);margin-bottom:8px;"><use href="#ic-history"/></svg>
+      <div style="font-size:14px;font-weight:600;color:var(--w);margin-bottom:4px;">Select a Snapshot</div>
+      <p class="hint small" style="text-align:center;max-width:240px;line-height:1.4;">
+        Select any snapshot on the left to decrypt and inspect its contents, and rollback your vault if needed.
+      </p>
+    `;
+  }
+  if (viewEl) viewEl.classList.add('hidden');
+
+  try {
+    const owner = state.config?.github_owner;
+    const repo  = state.config?.github_repo;
+    const path  = state.config?.github_path || 'vault.enc';
+    const token = state.vault?.github_pat;
+
+    if (!owner || !repo) {
+      throw new Error('Repository configuration missing.');
+    }
+
+    const commits = await GitHub.fetchCommitHistory(owner, repo, path, token, 30);
+    historyState.commits = commits;
+
+    if (commits.length === 0) {
+      if (metaEl) metaEl.textContent = 'No commit history found.';
+      if (listEl) {
+        listEl.innerHTML = `
+          <div style="padding:24px;text-align:center;color:var(--t3);font-size:12.5px;">
+            No snapshots recorded yet for ${escapeHtml(path)}.
+          </div>
+        `;
+      }
+      return;
+    }
+
+    if (metaEl) {
+      metaEl.textContent = `${commits.length} snapshot${commits.length > 1 ? 's' : ''} available`;
+    }
+
+    // Render timeline list
+    listEl.innerHTML = commits.map(c => {
+      const shortSha = c.sha.slice(0, 7);
+      const commitMsg = c.commit?.message || 'vault update';
+      const date = new Date(c.commit?.author?.date || c.commit?.committer?.date || Date.now());
+      const dateFmt = formatFullDateTime(date);
+      const relTime = formatRelativeTime(date);
+      const isCurrent = (c.sha === state.vaultSha);
+
+      return `
+        <div class="history-item ${isCurrent ? 'current-active' : ''}" data-sha="${c.sha}">
+          <div class="history-item-top">
+            <span class="history-sha-pill">${shortSha}</span>
+            ${isCurrent ? '<span class="history-current-pill">Current</span>' : ''}
+          </div>
+          <div class="history-item-msg" title="${escapeHtml(commitMsg)}">${escapeHtml(commitMsg)}</div>
+          <div class="history-item-meta">
+            <span>${dateFmt}</span>
+            <span style="opacity:0.8;">${relTime}</span>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // Attach click events
+    listEl.querySelectorAll('.history-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const sha = item.getAttribute('data-sha');
+        if (sha) selectCommitSnapshot(sha);
+      });
+    });
+
+    // Auto-select current version or first commit
+    const targetSha = commits.some(c => c.sha === state.vaultSha) ? state.vaultSha : commits[0].sha;
+    selectCommitSnapshot(targetSha);
+
+  } catch (err) {
+    if (metaEl) metaEl.textContent = 'Error loading history';
+    if (listEl) {
+      listEl.innerHTML = `
+        <div style="padding:20px;text-align:center;">
+          <p class="error-msg" style="margin-bottom:10px;">${escapeHtml(err.message)}</p>
+          <button type="button" class="btn-secondary btn-sm" id="history-retry-load-btn">
+            <svg class="ic ic-sm"><use href="#ic-refresh"/></svg>
+            <span>Try Again</span>
+          </button>
+        </div>
+      `;
+      document.getElementById('history-retry-load-btn')?.addEventListener('click', loadCommitHistory);
+    }
+  }
+}
+
+async function selectCommitSnapshot(commitSha) {
+  historyState.selectedSha = commitSha;
+
+  // Update active item highlight
+  document.querySelectorAll('#history-timeline-list .history-item').forEach(el => {
+    if (el.getAttribute('data-sha') === commitSha) {
+      el.classList.add('active');
+    } else {
+      el.classList.remove('active');
+    }
+  });
+
+  const emptyEl = document.getElementById('history-empty-placeholder');
+  const viewEl  = document.getElementById('history-content-view');
+
+  if (historyState.cachedSnapshots.has(commitSha)) {
+    const cachedData = historyState.cachedSnapshots.get(commitSha);
+    renderSnapshotInspector(commitSha, cachedData);
+    return;
+  }
+
+  // Show loading indicator in inspector
+  if (emptyEl) {
+    emptyEl.classList.remove('hidden');
+    emptyEl.innerHTML = `
+      <div class="spinner"></div>
+      <div style="font-size:14px;font-weight:600;color:var(--w);margin:12px 0 4px;">Decrypting Snapshot…</div>
+      <p class="hint small" style="text-align:center;">Retrieving ${commitSha.slice(0, 7)} from GitHub</p>
+    `;
+  }
+  if (viewEl) viewEl.classList.add('hidden');
+
+  try {
+    const owner = state.config?.github_owner;
+    const repo  = state.config?.github_repo;
+    const path  = state.config?.github_path || 'vault.enc';
+    const token = state.vault?.github_pat;
+
+    const fileRes = await GitHub.fetchFileAtCommit(owner, repo, path, commitSha, token);
+    const decryptedData = await decryptSnapshotBlob(fileRes.blob);
+
+    historyState.cachedSnapshots.set(commitSha, decryptedData);
+    renderSnapshotInspector(commitSha, decryptedData);
+
+  } catch (err) {
+    if (emptyEl) {
+      emptyEl.classList.remove('hidden');
+      emptyEl.innerHTML = `
+        <svg class="ic-lg" style="width:36px;height:36px;color:#ef4444;margin-bottom:8px;"><use href="#ic-lock"/></svg>
+        <div style="font-size:14px;font-weight:600;color:var(--w);margin-bottom:4px;">Cannot Decrypt Snapshot</div>
+        <p class="hint small" style="text-align:center;max-width:280px;line-height:1.45;color:var(--t2);">
+          ${err.message === 'DECRYPT_FAILED'
+            ? 'This older snapshot was encrypted with a different master password or salt.'
+            : escapeHtml(err.message)}
+        </p>
+        <button type="button" class="btn-secondary btn-sm" id="history-retry-pw-btn" style="margin-top:12px;">
+          <svg class="ic ic-sm"><use href="#ic-key"/></svg>
+          <span>Enter Master Password for Snapshot</span>
+        </button>
+      `;
+
+      document.getElementById('history-retry-pw-btn')?.addEventListener('click', async () => {
+        const pw = prompt('Enter the Master Password for snapshot ' + commitSha.slice(0, 7) + ':');
+        if (!pw) return;
+        try {
+          const owner = state.config?.github_owner;
+          const repo  = state.config?.github_repo;
+          const path  = state.config?.github_path || 'vault.enc';
+          const token = state.vault?.github_pat;
+          const fileRes = await GitHub.fetchFileAtCommit(owner, repo, path, commitSha, token);
+          const { data } = await Crypto.decryptVault(fileRes.blob, pw);
+          historyState.cachedSnapshots.set(commitSha, data);
+          renderSnapshotInspector(commitSha, data);
+        } catch {
+          Toast.error('Decryption failed. Incorrect password.');
+        }
+      });
+    }
+  }
+}
+
+function renderSnapshotInspector(commitSha, data) {
+  const emptyEl = document.getElementById('history-empty-placeholder');
+  const viewEl  = document.getElementById('history-content-view');
+
+  if (emptyEl) emptyEl.classList.add('hidden');
+  if (!viewEl) return;
+  viewEl.classList.remove('hidden');
+
+  const commit = historyState.commits.find(c => c.sha === commitSha);
+  const shortSha = commitSha.slice(0, 7);
+  const commitMsg = commit?.commit?.message || 'vault update';
+  const authorName = commit?.commit?.author?.name || 'Vault';
+  const date = new Date(commit?.commit?.author?.date || commit?.commit?.committer?.date || Date.now());
+  const dateFmt = formatFullDateTime(date);
+  const relTime = formatRelativeTime(date);
+  const isCurrent = (commitSha === state.vaultSha);
+
+  const passwordsCount = data.entries?.length || 0;
+  const cardsCount = data.cards?.length || 0;
+  const notesCount = (data.journal_notes?.length || data.notes?.length) || 0;
+  const docsCount = (data.documents?.length || data.docs?.length) || 0;
+
+  // Gather item preview chips
+  const previewChips = [];
+  (data.entries || []).slice(0, 6).forEach(e => {
+    previewChips.push(`<span class="history-item-chip"><svg class="ic ic-sm" style="color:var(--t2);"><use href="#ic-key"/></svg> ${escapeHtml(e.name || e.url || 'Password')}</span>`);
+  });
+  (data.cards || []).slice(0, 4).forEach(c => {
+    previewChips.push(`<span class="history-item-chip"><svg class="ic ic-sm" style="color:#a855f7;"><use href="#ic-credit-card"/></svg> ${escapeHtml(c.cardholder_name || c.bank_name || 'Card')}</span>`);
+  });
+  (data.journal_notes || data.notes || []).slice(0, 4).forEach(n => {
+    previewChips.push(`<span class="history-item-chip"><svg class="ic ic-sm" style="color:#f59e0b;"><use href="#ic-note"/></svg> ${escapeHtml(n.title || 'Note')}</span>`);
+  });
+  (data.documents || data.docs || []).slice(0, 4).forEach(d => {
+    previewChips.push(`<span class="history-item-chip"><svg class="ic ic-sm" style="color:#38bdf8;"><use href="#ic-id-card"/></svg> ${escapeHtml(d.name || 'Document')}</span>`);
+  });
+
+  const rollbackBoxHtml = isCurrent
+    ? `
+      <div class="history-rollback-box" style="background:rgba(34,197,94,0.08);border-color:rgba(34,197,94,0.25);">
+        <div style="display:flex;align-items:center;gap:8px;color:#22c55e;font-weight:600;font-size:13.5px;margin-bottom:4px;">
+          <svg class="ic"><use href="#ic-check"/></svg>
+          <span>Active Vault Version</span>
+        </div>
+        <p class="hint small" style="margin:0;line-height:1.45;">
+          Your current open vault matches this snapshot (${shortSha}). No rollback is needed.
+        </p>
+      </div>
+    `
+    : `
+      <div class="history-rollback-box">
+        <div style="font-size:13.5px;font-weight:600;color:var(--w);margin-bottom:4px;">
+          Restore to this snapshot?
+        </div>
+        <p class="hint small" style="margin-bottom:12px;line-height:1.45;">
+          Rolling back will replace your current vault with this version (${shortSha}) and safely commit a new rollback commit to GitHub.
+        </p>
+        <button type="button" class="btn-primary btn-rollback" id="history-rollback-btn">
+          <svg class="ic"><use href="#ic-history"/></svg>
+          <span>Rollback Vault to ${shortSha}</span>
+        </button>
+      </div>
+    `;
+
+  viewEl.innerHTML = `
+    <div class="history-details-header">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <span class="history-sha-pill" style="font-size:12px;">commit ${shortSha}</span>
+        <span style="font-size:11.5px;color:var(--t3);">${relTime}</span>
+      </div>
+      <div class="history-details-title">${escapeHtml(commitMsg)}</div>
+      <div class="history-details-meta">
+        <span>Committed: <strong>${dateFmt}</strong></span>
+        <span>By: <strong>${escapeHtml(authorName)}</strong></span>
+      </div>
+    </div>
+
+    <!-- Snapshot Stats Grid -->
+    <div class="history-stats-grid">
+      <div class="history-stat-card">
+        <div class="history-stat-icon" style="background:rgba(56, 189, 248, 0.12);color:#38bdf8;">
+          <svg class="ic"><use href="#ic-key"/></svg>
+        </div>
+        <div>
+          <div class="history-stat-num">${passwordsCount}</div>
+          <div class="history-stat-lbl">Passwords</div>
+        </div>
+      </div>
+      <div class="history-stat-card">
+        <div class="history-stat-icon" style="background:rgba(168, 85, 247, 0.12);color:#a855f7;">
+          <svg class="ic"><use href="#ic-credit-card"/></svg>
+        </div>
+        <div>
+          <div class="history-stat-num">${cardsCount}</div>
+          <div class="history-stat-lbl">Cards & Banks</div>
+        </div>
+      </div>
+      <div class="history-stat-card">
+        <div class="history-stat-icon" style="background:rgba(245, 158, 11, 0.12);color:#f59e0b;">
+          <svg class="ic"><use href="#ic-note"/></svg>
+        </div>
+        <div>
+          <div class="history-stat-num">${notesCount}</div>
+          <div class="history-stat-lbl">Journal Notes</div>
+        </div>
+      </div>
+      <div class="history-stat-card">
+        <div class="history-stat-icon" style="background:rgba(34, 197, 94, 0.12);color:#22c55e;">
+          <svg class="ic"><use href="#ic-id-card"/></svg>
+        </div>
+        <div>
+          <div class="history-stat-num">${docsCount}</div>
+          <div class="history-stat-lbl">Documents</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Item Preview Section -->
+    ${previewChips.length > 0 ? `
+      <div class="history-items-section">
+        <div class="history-items-heading">Snapshot Items Overview</div>
+        <div class="history-items-chips">${previewChips.join('')}</div>
+      </div>
+    ` : ''}
+
+    <!-- Rollback Action Box -->
+    ${rollbackBoxHtml}
+  `;
+
+  if (!isCurrent) {
+    document.getElementById('history-rollback-btn')?.addEventListener('click', () => {
+      rollbackToCommit(commitSha, data);
+    });
+  }
+}
+
+async function rollbackToCommit(commitSha, snapshotData) {
+  const shortSha = commitSha.slice(0, 7);
+  const confirmMsg =
+    `⚠️ ROLLBACK CONFIRMATION:\n\n` +
+    `Are you sure you want to rollback your vault to snapshot ${shortSha}?\n\n` +
+    `Your current vault data will be replaced with this version and committed to GitHub as:\n` +
+    `"vault: rollback to snapshot ${shortSha}"\n\n` +
+    `All historical commits remain preserved in Git so you can revert anytime.`;
+
+  if (!confirm(confirmMsg)) return;
+
+  const btn = document.getElementById('history-rollback-btn');
+  if (btn) {
+    btn.classList.add('btn-loading');
+    btn.disabled = true;
+  }
+
+  try {
+    const restored = JSON.parse(JSON.stringify(snapshotData));
+    if (!restored.entries) restored.entries = [];
+    if (!restored.cards)   restored.cards   = [];
+    if (!restored.notes)   restored.notes   = restored.journal_notes || [];
+    if (!restored.docs)    restored.docs    = restored.documents || [];
+    if (!restored.github_pat && state.vault?.github_pat) {
+      restored.github_pat = state.vault.github_pat;
+    }
+
+    state.vault = restored;
+    await saveVault(`vault: rollback to snapshot ${shortSha}`);
+    renderActiveTab();
+    hideModal('modal-history');
+    Toast.success(`Vault rolled back to snapshot ${shortSha}!`);
+  } catch (err) {
+    Toast.error(`Rollback failed: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.classList.remove('btn-loading');
+      btn.disabled = false;
+    }
+  }
+}
+
 // ─── Event Wiring ─────────────────────────────────────────────────────────────
 
 function initEventListeners() {
@@ -3072,6 +3662,30 @@ function initEventListeners() {
       Toast.success(`Quick unlock set to ${newType.toUpperCase()}`);
     }
   });
+
+  // ── 1-Click Backup & Restore ──────────────────────────────────────────────
+  document.getElementById('settings-backup-enc-btn')?.addEventListener('click', exportEncryptedBackup);
+  document.getElementById('settings-export-json-btn')?.addEventListener('click', exportDecryptedJson);
+  document.getElementById('settings-restore-file-btn')?.addEventListener('click', () => {
+    state.isPickingFile = true;
+    document.getElementById('backup-file-input')?.click();
+  });
+  document.getElementById('backup-file-input')?.addEventListener('change', async e => {
+    state.isPickingFile = false;
+    await handleBackupFileImport(e);
+  });
+  document.getElementById('backup-file-input')?.addEventListener('cancel', () => {
+    state.isPickingFile = false;
+  });
+
+  // ── Git Version History & Rollback ────────────────────────────────────────
+  document.getElementById('vault-history-btn')?.addEventListener('click', openHistoryModal);
+  document.getElementById('settings-open-history-btn')?.addEventListener('click', () => {
+    hideModal('modal-settings');
+    openHistoryModal();
+  });
+  document.getElementById('modal-history-close')?.addEventListener('click', () => hideModal('modal-history'));
+  document.getElementById('history-refresh-btn')?.addEventListener('click', loadCommitHistory);
 
   // ── Biometric unlock buttons on unlock screens ────────────────────────────
   document.getElementById('unlock-quick-bio-btn')?.addEventListener('click', triggerBiometricUnlock);
@@ -3321,6 +3935,7 @@ function initKeyboardShortcuts() {
           }
           break;
         case 'g': openGeneratorModal();                                break;
+        case 'h': openHistoryModal();                                  break;
         case 'i': document.getElementById('csv-file-input').click();  break;
         case 'l': lockVault();                                         break;
       }
@@ -3334,7 +3949,7 @@ function initKeyboardShortcuts() {
         saveCurrentNote();
         return;
       }
-      ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer'].forEach(id => {
+      ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer', 'modal-settings', 'modal-card', 'modal-history'].forEach(id => {
         const m = document.getElementById(id);
         if (m && m.classList.contains('visible')) hideModal(id);
       });
