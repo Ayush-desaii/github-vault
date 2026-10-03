@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vault</title>
+  <meta name="description" content="Personal zero-knowledge password manager" />
+  <meta name="theme-color" content="#000" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ── SVG icon sprite (hidden) ─────────────────────────────────────────── -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="ic-lock" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="7" width="10" height="8" rx="1.5"/>
+    <path d="M5 7V5a3 3 0 0 1 6 0v2"/>
+    <circle cx="8" cy="11.5" r=".8" fill="currentColor" stroke="none"/>
+  </symbol>
+  <symbol id="ic-plus" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M8 3v10M3 8h10"/>
+  </symbol>
+  <symbol id="ic-shuffle" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 5h8m3 0-2-2m2 2-2 2M14 11H6m-3 0 2-2m-2 2 2 2"/>
+  </symbol>
+  <symbol id="ic-eye" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+    <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z"/>
+    <circle cx="8" cy="8" r="2"/>
+  </symbol>
+  <symbol id="ic-eye-off" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+    <path d="M2 2l12 12M6.5 3.5A7.3 7.3 0 0 1 8 3c4.5 0 7 5 7 5a12.7 12.7 0 0 1-2.2 2.9M4.5 4.5C2.6 5.7 1 8 1 8s2.5 5 7 5a6.8 6.8 0 0 0 3.5-.9"/>
+    <path d="M6.2 6.2a2 2 0 0 0 3.6 3.6"/>
+  </symbol>
+  <symbol id="ic-copy" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="5" y="5" width="9" height="9" rx="1.5"/>
+    <path d="M2 11V2h9"/>
+  </symbol>
+  <symbol id="ic-edit" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m11 2 3 3-8 8H3v-3l8-8z"/>
+  </symbol>
+  <symbol id="ic-close" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+    <path d="M3 3l10 10M13 3 3 13"/>
+  </symbol>
+  <symbol id="ic-refresh" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 3a7 7 0 1 0 1 5"/>
+    <path d="M14 2v4h-4"/>
+  </symbol>
+  <symbol id="ic-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M2 8l4.5 4.5L14 4"/>
+  </symbol>
+  <symbol id="ic-search" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+    <circle cx="7" cy="7" r="4.5"/>
+    <path d="m10.5 10.5 3 3"/>
+  </symbol>
+  <symbol id="ic-key" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="6" cy="6.5" r="3.5"/>
+    <path d="M9 9l5 5M12 12l-1.5 1.5"/>
+  </symbol>
+  <symbol id="ic-upload" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 10V3M5 6l3-3 3 3"/>
+    <path d="M3 11v1.5A1.5 1.5 0 0 0 4.5 14h7a1.5 1.5 0 0 0 1.5-1.5V11"/>
+  </symbol>
+</svg>
+
+<!-- helper: inline SVG icon -->
+<!-- usage: <svg class="ic"><use href="#ic-lock"/></svg> -->
+<style>
+  .ic { width: 16px; height: 16px; display: inline-block; vertical-align: middle; }
+  .ic-sm { width: 13px; height: 13px; }
+  .ic-lg { width: 20px; height: 20px; }
+</style>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     LOADING
+════════════════════════════════════════════════════════════════ -->
+<div id="screen-loading" class="screen active">
+  <div class="loading-inner">
+    <div class="logo">
+      <svg class="ic-lg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="9" width="12" height="9" rx="1.5"/>
+        <path d="M7 9V7a3 3 0 0 1 6 0v2"/>
+        <circle cx="10" cy="13.5" r="1" fill="currentColor" stroke="none"/>
+      </svg>
+    </div>
+    <div class="spinner"></div>
+    <p id="loading-msg">Starting…</p>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     SETUP WIZARD
+════════════════════════════════════════════════════════════════ -->
+<div id="screen-setup" class="screen">
+  <div class="setup-container">
+
+    <div class="setup-header">
+      <div class="logo">
+        <svg class="ic-lg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="4" y="9" width="12" height="9" rx="1.5"/>
+          <path d="M7 9V7a3 3 0 0 1 6 0v2"/>
+          <circle cx="10" cy="13.5" r="1" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+      <h1>Set up Vault</h1>
+      <div class="step-dots">
+        <span class="step-dot active" data-step="1"></span>
+        <span class="step-dot"        data-step="2"></span>
+        <span class="step-dot"        data-step="3"></span>
+      </div>
+    </div>
+
+    <!-- Step 1 -->
+    <div class="setup-step" id="setup-step-1">
+      <h2>Master password</h2>
+      <p class="hint">This is the only password you need to remember. There is no recovery — do not forget it.</p>
+      <div class="field">
+        <label>Password</label>
+        <div class="input-wrap">
+          <input type="password" id="setup-master-pw" placeholder="Enter a strong passphrase" autocomplete="new-password" />
+          <button class="toggle-pw" data-target="setup-master-pw">
+            <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="strength-bar-wrap"><div class="strength-bar" id="pw-strength-bar"></div></div>
+      <p class="strength-label" id="pw-strength-label">&nbsp;</p>
+      <div class="field">
+        <label>Confirm</label>
+        <div class="input-wrap">
+          <input type="password" id="setup-master-pw-confirm" placeholder="Repeat your password" autocomplete="new-password" />
+          <button class="toggle-pw" data-target="setup-master-pw-confirm">
+            <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+          </button>
+        </div>
+      </div>
+      <p class="error-msg hidden" id="setup-step1-error"></p>
+      <button class="btn-primary" id="setup-step1-next">Continue</button>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="setup-step hidden" id="setup-step-2">
+      <h2>Quick unlock</h2>
+      <p class="hint">Choose a quick way to unlock your vault without retyping your full master password each session.</p>
+      <div class="toggle-group" id="quick-type-toggle">
+        <button class="toggle-opt active" data-type="pin">PIN code</button>
+        <button class="toggle-opt"        data-type="pattern">Pattern</button>
+      </div>
+
+      <div id="setup-pin-wrap">
+        <p class="hint small">Enter a 4–8 digit PIN</p>
+        <div class="pin-dots" id="setup-pin-display"></div>
+        <div class="numpad"   id="setup-numpad"></div>
+      </div>
+
+      <div id="setup-pattern-wrap" class="hidden">
+        <p class="hint small">Draw a pattern connecting at least 4 dots</p>
+        <canvas id="setup-pattern-canvas" width="220" height="220"></canvas>
+        <button class="btn-link" id="setup-pattern-reset">Reset pattern</button>
+      </div>
+
+      <p class="error-msg hidden" id="setup-step2-error"></p>
+      <button class="btn-primary hidden" id="setup-step2-next">Continue</button>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="setup-step hidden" id="setup-step-3">
+      <h2>GitHub storage</h2>
+      <p class="hint">Your encrypted vault will be committed to a public GitHub repository. Create a repo (e.g. <code>my-vault</code>) and generate a fine-grained PAT with <strong>Contents: Read &amp; Write</strong>.</p>
+      <div class="field">
+        <label>GitHub username</label>
+        <input type="text" id="setup-gh-owner" placeholder="your-username" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>Repository name</label>
+        <input type="text" id="setup-gh-repo" placeholder="my-vault" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>Personal access token</label>
+        <div class="input-wrap">
+          <input type="password" id="setup-gh-pat" placeholder="github_pat_…" autocomplete="off" />
+          <button class="toggle-pw" data-target="setup-gh-pat">
+            <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+          </button>
+        </div>
+        <p class="hint small">
+          <a href="https://github.com/settings/tokens?type=beta" target="_blank" rel="noopener">
+            Create a fine-grained PAT →
+          </a>
+        </p>
+      </div>
+      <p class="error-msg hidden" id="setup-step3-error"></p>
+      <button class="btn-primary" id="setup-step3-next">Create vault</button>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="setup-step hidden" id="setup-step-4">
+      <div class="success-icon">
+        <svg width="36" height="36" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <use href="#ic-check"/>
+        </svg>
+      </div>
+      <h2>Vault created</h2>
+      <p class="hint">Your encrypted vault has been committed to GitHub. Bookmark this page.</p>
+      <button class="btn-primary" id="setup-done-btn">Open vault</button>
+    </div>
+
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     UNLOCK
+════════════════════════════════════════════════════════════════ -->
+<div id="screen-unlock" class="screen">
+  <div class="unlock-container">
+    <div class="logo">
+      <svg class="ic-lg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="9" width="12" height="9" rx="1.5"/>
+        <path d="M7 9V7a3 3 0 0 1 6 0v2"/>
+        <circle cx="10" cy="13.5" r="1" fill="currentColor" stroke="none"/>
+      </svg>
+    </div>
+    <h1>Vault</h1>
+
+    <div id="unlock-full" style="width:100%">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="field">
+          <label>Master password</label>
+          <div class="input-wrap">
+            <input type="password" id="unlock-master-pw" placeholder="Enter master password" autocomplete="current-password" />
+            <button class="toggle-pw" data-target="unlock-master-pw">
+              <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="unlock-quick-input-wrap"></div>
+        <p class="error-msg hidden" id="unlock-error"></p>
+        <button class="btn-primary" id="unlock-btn">Unlock</button>
+      </div>
+    </div>
+
+    <div id="unlock-quick-only" class="hidden" style="width:100%">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+        <p class="hint" style="text-align:center">Session locked. Enter your quick unlock to continue.</p>
+        <div id="unlock-quick-only-input-wrap" style="width:100%"></div>
+        <p class="error-msg hidden" id="unlock-quick-error"></p>
+        <button class="btn-link" id="unlock-use-master-btn">Use master password instead</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     VAULT (main app)
+════════════════════════════════════════════════════════════════ -->
+<div id="screen-vault" class="screen">
+
+  <header class="vault-header">
+    <div class="vault-title">
+      <span class="vault-icon">
+        <svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="7" width="10" height="8" rx="1.5"/>
+          <path d="M5 7V5a3 3 0 0 1 6 0v2"/>
+          <circle cx="8" cy="11.5" r=".8" fill="currentColor" stroke="none"/>
+        </svg>
+      </span>
+      Vault
+    </div>
+    <div class="vault-actions">
+      <button class="btn-icon" id="vault-add-btn" title="Add (A)">
+        <svg class="ic"><use href="#ic-plus"/></svg>
+      </button>
+      <button class="btn-icon" id="vault-gen-btn" title="Generator (G)">
+        <svg class="ic"><use href="#ic-shuffle"/></svg>
+      </button>
+      <button class="btn-icon" id="vault-import-btn" title="Import from Google CSV (I)">
+        <svg class="ic"><use href="#ic-upload"/></svg>
+      </button>
+      <button class="btn-icon" id="vault-lock-btn" title="Lock (L)">
+        <svg class="ic"><use href="#ic-lock"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Hidden file input — triggered by the import button -->
+  <input type="file" id="csv-file-input" accept=".csv,text/csv" style="display:none" />
+
+  <div class="vault-search-wrap">
+    <svg class="ic search-icon"><use href="#ic-search"/></svg>
+    <input type="search" id="vault-search" placeholder="Search…" />
+  </div>
+
+  <main id="vault-list" class="vault-list"></main>
+
+  <div class="sync-status" id="sync-status"></div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     MODAL — Add / Edit entry
+════════════════════════════════════════════════════════════════ -->
+<div id="modal-entry" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2 id="modal-entry-title">Add password</h2>
+      <button class="btn-icon" id="modal-entry-close">
+        <svg class="ic"><use href="#ic-close"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Name *</label>
+        <input type="text" id="entry-name" placeholder="Google, GitHub, Bank…" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>URL</label>
+        <input type="url" id="entry-url" placeholder="https://example.com" />
+      </div>
+      <div class="field">
+        <label>Username / Email *</label>
+        <input type="text" id="entry-username" placeholder="user@example.com" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>Password *</label>
+        <div class="input-wrap">
+          <input type="password" id="entry-password" placeholder="Password" autocomplete="new-password" />
+          <button class="toggle-pw" data-target="entry-password">
+            <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+          </button>
+          <button class="btn-generate-inline" id="entry-gen-btn" title="Generate">
+            <svg class="ic ic-sm"><use href="#ic-shuffle"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Notes</label>
+        <textarea id="entry-notes" rows="3" placeholder="TOTP key, security questions…"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-danger hidden" id="modal-entry-delete">Delete</button>
+      <div class="modal-footer-right">
+        <button class="btn-secondary" id="modal-entry-cancel">Cancel</button>
+        <button class="btn-primary"   id="modal-entry-save">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     MODAL — Password generator
+════════════════════════════════════════════════════════════════ -->
+<div id="modal-generator" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box modal-box-sm">
+    <div class="modal-header">
+      <h2>Password generator</h2>
+      <button class="btn-icon" id="modal-gen-close">
+        <svg class="ic"><use href="#ic-close"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="gen-output">
+        <code id="gen-pw-output">—</code>
+        <button class="btn-icon" id="gen-copy-btn" title="Copy">
+          <svg class="ic ic-sm"><use href="#ic-copy"/></svg>
+        </button>
+        <button class="btn-icon" id="gen-refresh-btn" title="Regenerate">
+          <svg class="ic ic-sm"><use href="#ic-refresh"/></svg>
+        </button>
+      </div>
+      <div class="field">
+        <label>Length — <span id="gen-length-label">20</span></label>
+        <input type="range" id="gen-length" min="8" max="64" value="20" />
+      </div>
+      <div class="checkbox-group">
+        <label><input type="checkbox" id="gen-upper"   checked /> Uppercase (A–Z)</label>
+        <label><input type="checkbox" id="gen-lower"   checked /> Lowercase (a–z)</label>
+        <label><input type="checkbox" id="gen-digits"  checked /> Numbers (0–9)</label>
+        <label><input type="checkbox" id="gen-symbols" checked /> Symbols (!@#…)</label>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Toast -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     MODAL — Import preview
+════════════════════════════════════════════════════════════════ -->
+<div id="modal-import" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2>Import passwords</h2>
+      <button class="btn-icon" id="modal-import-close">
+        <svg class="ic"><use href="#ic-close"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <!-- Summary row -->
+      <div id="import-summary" style="display:flex;flex-direction:column;gap:6px">
+        <p id="import-found-msg" class="hint"></p>
+        <p id="import-dup-msg"   class="hint small" style="color:var(--t3)"></p>
+      </div>
+
+      <!-- Scrollable preview list -->
+      <div id="import-preview-list" style="
+        max-height: 280px;
+        overflow-y: auto;
+        border: 1px solid var(--line);
+        border-radius: var(--r);
+      "></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="modal-import-cancel">Cancel</button>
+      <button class="btn-primary"   id="modal-import-confirm">Import</button>
+    </div>
+  </div>
+</div>
+
+<script src="crypto.js"></script>
+<script src="github.js"></script>
+<script src="ui.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
