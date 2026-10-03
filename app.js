@@ -305,8 +305,53 @@ function initSetupWizard() {
       // 2. Check if vault.enc already exists
       const { exists, sha: existingSha } = await GitHub.checkVaultExists(owner, repo, 'vault.enc', pat);
       if (exists) {
-        // Don't overwrite an existing vault from setup — ask user to reload
-        showErr(errEl, 'vault.enc already exists in this repo. To use an existing vault, reload the page and enter your master password on the unlock screen. If you want to start fresh, manually delete vault.enc from the repo.');
+        // Vault already exists — this is a new device connecting to an existing vault.
+        // Try to decrypt it with the credentials entered in this wizard.
+        const { masterPw, quickType, quickSecret } = state.setup;
+        const masterSecret = masterPw + '\x00' + quickSecret;
+
+        let blob, sha, data, key, salt;
+        try {
+          ({ blob, sha } = await GitHub.fetchVault(owner, repo, 'vault.enc', pat));
+        } catch {
+          showErr(errEl, 'Found an existing vault but could not fetch it. Check your network and try again.');
+          return;
+        }
+
+        try {
+          ({ data, key, salt } = await Crypto.decryptVault(blob, masterSecret));
+        } catch {
+          showErr(errEl,
+            'A vault already exists in this repo but the master password or PIN/pattern is incorrect. ' +
+            'Use the same credentials you chose when you first created the vault.'
+          );
+          return;
+        }
+
+        // ✅ Credentials match — connect this device to the existing vault
+        const config = {
+          github_owner:      owner,
+          github_repo:       repo,
+          github_path:       'vault.enc',
+          quick_unlock_type: quickType,
+          pin_length:        quickType === 'pin' ? quickSecret.length : null,
+        };
+        saveConfig(config);
+
+        state.vault     = data;
+        state.vaultKey  = key;
+        state.vaultSalt = salt;
+        state.vaultBlob = blob;
+        state.vaultSha  = sha;
+        sessionSet('vault_sha', sha);
+
+        await cacheKeyForQuickUnlock(key, quickSecret);
+
+        // Show success step with a "connected" message, then open vault
+        document.querySelector('#setup-step-4 h2').textContent = 'Vault connected';
+        document.querySelector('#setup-step-4 .hint').textContent =
+          'This device is now connected to your existing vault.';
+        goToStep(4);
         return;
       }
 

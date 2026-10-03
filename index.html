@@ -167,7 +167,7 @@
     <!-- Step 3 -->
     <div class="setup-step hidden" id="setup-step-3">
       <h2>GitHub storage</h2>
-      <p class="hint">Your encrypted vault will be committed to a public GitHub repository. Create a repo (e.g. <code>my-vault</code>) and generate a fine-grained PAT with <strong>Contents: Read &amp; Write</strong>.</p>
+      <p class="hint">Enter your GitHub repo details. If the repo already contains a vault, you'll be connected to it — just use the same master password and PIN/pattern you set up originally. Otherwise a new vault will be created.</p>
       <div class="field">
         <label>GitHub username</label>
         <input type="text" id="setup-gh-owner" placeholder="your-username" autocomplete="off" spellcheck="false" />
@@ -191,7 +191,7 @@
         </p>
       </div>
       <p class="error-msg hidden" id="setup-step3-error"></p>
-      <button class="btn-primary" id="setup-step3-next">Create vault</button>
+      <button class="btn-primary" id="setup-step3-next">Continue</button>
     </div>
 
     <!-- Step 4 -->
