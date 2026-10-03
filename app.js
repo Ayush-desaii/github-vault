@@ -97,6 +97,70 @@ function sessionGet(key)        { return sessionStorage.getItem(key); }
 function sessionSet(key, value) { sessionStorage.setItem(key, value); }
 function sessionClear()         { sessionStorage.clear(); }
 
+// ─── URL Auto-Detection ───────────────────────────────────────────────────────
+
+function detectRepoFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  let owner = params.get('owner');
+  let repo  = params.get('repo');
+  if (!owner && repo && repo.includes('/')) {
+    [owner, repo] = repo.split('/');
+  }
+
+  if (!owner && !repo && window.location.hash) {
+    const hash = window.location.hash.replace(/^#/, '');
+    if (hash.includes('=')) {
+      const hashParams = new URLSearchParams(hash);
+      owner = hashParams.get('owner');
+      repo  = hashParams.get('repo');
+    } else if (hash.includes('/')) {
+      const parts = hash.split('/').filter(Boolean);
+      if (parts.length >= 2) {
+        owner = parts[0];
+        repo  = parts[1];
+      }
+    }
+  }
+
+  // Check if hosted on GitHub Pages: https://<owner>.github.io/<repo>/
+  if (!owner && window.location.hostname.endsWith('.github.io')) {
+    owner = window.location.hostname.replace('.github.io', '');
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    if (pathParts.length > 0) {
+      repo = pathParts[0];
+    }
+  }
+
+  if (owner && repo) {
+    return {
+      github_owner: owner,
+      github_repo: repo,
+      github_path: 'vault.enc',
+      quick_unlock_type: 'pin',
+      pin_length: 4,
+    };
+  }
+  return null;
+}
+
+function showUnlockScreen() {
+  const config = state.config;
+  const wrappedKey = sessionGet('wrapped_key');
+
+  const repoLabel = document.getElementById('unlock-repo-label');
+  if (repoLabel && config?.github_owner && config?.github_repo) {
+    repoLabel.textContent = `${config.github_owner} / ${config.github_repo}`;
+    repoLabel.style.display = 'block';
+  }
+
+  showScreen('unlock');
+  if (wrappedKey) {
+    showQuickOnlyUnlock(config.quick_unlock_type || 'pin');
+  } else {
+    showFullUnlock(config.quick_unlock_type || 'pin');
+  }
+}
+
 // ─── Initialisation ───────────────────────────────────────────────────────────
 
 async function init() {
@@ -105,16 +169,45 @@ async function init() {
   initPasswordToggles();
   initKeyboardShortcuts();
 
-  const config = loadConfig();
+  let config = loadConfig();
+
+  // If no config found locally, try to auto-detect repository from URL / GitHub Pages
+  if (!config) {
+    const detected = detectRepoFromUrl();
+    if (detected) {
+      setLoadingMsg(`Checking repository (${detected.github_owner}/${detected.github_repo})…`);
+      try {
+        const { blob, sha } = await GitHub.fetchVault(
+          detected.github_owner,
+          detected.github_repo,
+          detected.github_path || 'vault.enc'
+        );
+
+        // Found an existing vault! Set config, store blob & sha
+        config = detected;
+        saveConfig(config);
+        state.vaultBlob = blob;
+        sessionSet('vault_sha', sha);
+        state.vaultSha = sha;
+      } catch (err) {
+        console.log('No existing vault found in detected repo:', err);
+      }
+    }
+  }
 
   if (!config) {
-    // First run — show setup wizard
+    // No saved or detected config — show setup wizard
     showScreen('setup');
     initSetupWizard();
     return;
   }
 
   state.config = config;
+
+  if (state.vaultBlob) {
+    showUnlockScreen();
+    return;
+  }
 
   // Try to fetch the vault blob from GitHub
   try {
@@ -130,15 +223,7 @@ async function init() {
     sessionSet('vault_sha', sha);
     state.vaultSha  = sha;
 
-    // Check if session has a wrapped key → offer quick unlock
-    const wrappedKey = sessionGet('wrapped_key');
-
-    showScreen('unlock');
-    if (wrappedKey) {
-      showQuickOnlyUnlock(config.quick_unlock_type);
-    } else {
-      showFullUnlock(config.quick_unlock_type);
-    }
+    showUnlockScreen();
 
   } catch (err) {
     if (err.message === 'NOT_FOUND') {
@@ -159,6 +244,87 @@ let setupPatternLock = null;
 
 function initSetupWizard() {
   let currentStep = 1;
+
+  // ── Mode Toggle: Create New vs Connect Existing ──
+  const modeCreateBtn  = document.getElementById('mode-create-btn');
+  const modeConnectBtn = document.getElementById('mode-connect-btn');
+  const connectStep    = document.getElementById('setup-connect-step');
+  const stepDots       = document.getElementById('setup-step-dots');
+  const setupTitle     = document.getElementById('setup-title');
+
+  function setSetupMode(mode) {
+    if (mode === 'connect') {
+      modeCreateBtn?.classList.remove('active');
+      modeConnectBtn?.classList.add('active');
+      document.querySelectorAll('.setup-step').forEach(s => s.classList.add('hidden'));
+      connectStep?.classList.remove('hidden');
+      stepDots?.classList.add('hidden');
+      if (setupTitle) setupTitle.textContent = 'Connect Vault';
+
+      const detected = detectRepoFromUrl();
+      if (detected) {
+        const ownerInput = document.getElementById('connect-gh-owner');
+        const repoInput  = document.getElementById('connect-gh-repo');
+        if (ownerInput && !ownerInput.value) ownerInput.value = detected.github_owner;
+        if (repoInput && !repoInput.value)   repoInput.value  = detected.github_repo;
+      }
+    } else {
+      modeCreateBtn?.classList.add('active');
+      modeConnectBtn?.classList.remove('active');
+      connectStep?.classList.add('hidden');
+      stepDots?.classList.remove('hidden');
+      if (setupTitle) setupTitle.textContent = 'Set up Vault';
+      goToStep(1);
+    }
+  }
+
+  modeCreateBtn?.addEventListener('click', () => setSetupMode('create'));
+  modeConnectBtn?.addEventListener('click', () => setSetupMode('connect'));
+
+  // Connect Existing Vault button handler
+  document.getElementById('connect-step-btn')?.addEventListener('click', async () => {
+    const owner = document.getElementById('connect-gh-owner').value.trim();
+    const repo  = document.getElementById('connect-gh-repo').value.trim();
+    const pat   = document.getElementById('connect-gh-pat').value.trim() || null;
+    const errEl = document.getElementById('connect-step-error');
+    const btn   = document.getElementById('connect-step-btn');
+
+    if (!owner || !repo) {
+      showErr(errEl, 'Please enter both GitHub username and repository name.');
+      return;
+    }
+
+    errEl.classList.add('hidden');
+    btn.classList.add('btn-loading');
+    btn.disabled = true;
+
+    try {
+      const { blob, sha } = await GitHub.fetchVault(owner, repo, 'vault.enc', pat);
+
+      const config = {
+        github_owner: owner,
+        github_repo:  repo,
+        github_path:  'vault.enc',
+        quick_unlock_type: 'pin',
+        pin_length:   4,
+      };
+      saveConfig(config);
+      state.config    = config;
+      state.vaultBlob = blob;
+      state.vaultSha  = sha;
+      sessionSet('vault_sha', sha);
+
+      showUnlockScreen();
+    } catch (err) {
+      let msg = 'Could not find vault.enc in this repository.';
+      if (err.message === 'NOT_FOUND')   msg = 'Repository or vault.enc not found. Check username and repo.';
+      if (err.message === 'UNAUTHORIZED' || err.message === 'FORBIDDEN') msg = 'Repository is private. Please enter a valid PAT.';
+      showErr(errEl, msg);
+    } finally {
+      btn.classList.remove('btn-loading');
+      btn.disabled = false;
+    }
+  });
 
   // ── Step dot helpers ──
   function setStepDot(step) {
@@ -430,16 +596,47 @@ let unlockPatternFull  = null;
 let unlockPinQuick     = null;
 let unlockPatternQuick = null;
 
+let currentUnlockType = 'pin';
+
 /** Show full unlock (master password + quick secret) */
 function showFullUnlock(quickType) {
+  currentUnlockType = quickType || 'pin';
   document.getElementById('unlock-full').classList.remove('hidden');
   document.getElementById('unlock-quick-only').classList.add('hidden');
   document.getElementById('unlock-error').classList.add('hidden');
 
+  renderFullUnlockQuickInput(currentUnlockType);
+
+  // Unlock button
+  document.getElementById('unlock-btn').onclick = () => handleFullUnlock(currentUnlockType);
+
+  // Enter key on password field
+  document.getElementById('unlock-master-pw').onkeydown = e => {
+    if (e.key === 'Enter') handleFullUnlock(currentUnlockType);
+  };
+
+  // Switch repository / disconnect button
+  const switchVaultBtn = document.getElementById('unlock-switch-vault-btn');
+  if (switchVaultBtn) {
+    switchVaultBtn.onclick = () => {
+      if (confirm('Disconnect this repository and switch vault?')) {
+        clearConfig();
+        sessionClear();
+        state.vaultBlob = null;
+        showScreen('setup');
+        initSetupWizard();
+      }
+    };
+  }
+
+  document.getElementById('unlock-master-pw').focus();
+}
+
+function renderFullUnlockQuickInput(type) {
   const wrap = document.getElementById('unlock-quick-input-wrap');
   wrap.innerHTML = '';
 
-  if (quickType === 'pin') {
+  if (type === 'pin') {
     const display = document.createElement('div');
     display.className = 'pin-dots';
     display.id        = 'unlock-pin-display';
@@ -463,15 +660,15 @@ function showFullUnlock(quickType) {
     unlockPatternFull = new PatternLock(canvas);
   }
 
-  // Unlock button
-  document.getElementById('unlock-btn').onclick = () => handleFullUnlock(quickType);
-
-  // Enter key on password field
-  document.getElementById('unlock-master-pw').onkeydown = e => {
-    if (e.key === 'Enter') handleFullUnlock(quickType);
-  };
-
-  document.getElementById('unlock-master-pw').focus();
+  const toggleBtn = document.getElementById('unlock-type-toggle-btn');
+  if (toggleBtn) {
+    toggleBtn.textContent = type === 'pin' ? 'Using pattern? Switch to pattern' : 'Using PIN? Switch to PIN';
+    toggleBtn.onclick = () => {
+      currentUnlockType = type === 'pin' ? 'pattern' : 'pin';
+      renderFullUnlockQuickInput(currentUnlockType);
+      document.getElementById('unlock-btn').onclick = () => handleFullUnlock(currentUnlockType);
+    };
+  }
 }
 
 /** Show quick-only unlock (session has wrapped key — PIN/pattern only) */
@@ -517,7 +714,6 @@ function showQuickOnlyUnlock(quickType) {
       numpadId:  'unlock-quick-numpad',
       minLen:    4,        // minimum to enable button
       maxLen:    pinLen,   // how many dots to show
-      // No onComplete — user taps the Unlock button explicitly
     });
   } else {
     const canvas = document.createElement('canvas');
@@ -549,7 +745,7 @@ async function handleFullUnlock(quickType) {
   const errEl = document.getElementById('unlock-error');
 
   if (!masterPw) { showErr(errEl, 'Enter your master password.'); return; }
-  if (!quickSecret || quickSecret === '' || quickSecret === '0' || quickSecret.split('-').length < 4 && quickType === 'pattern') {
+  if (!quickSecret || quickSecret === '' || quickSecret === '0' || (quickType === 'pattern' && quickSecret.split('-').length < 4)) {
     showErr(errEl, `Enter your ${quickType === 'pin' ? 'PIN' : 'pattern'}.`);
     return;
   }
@@ -566,6 +762,13 @@ async function handleFullUnlock(quickType) {
     state.vaultKey  = key;
     state.vaultSalt = salt;
     state.vaultSha  = sessionGet('vault_sha');
+
+    // Persist quick unlock preferences in config
+    if (state.config) {
+      state.config.quick_unlock_type = quickType;
+      state.config.pin_length = quickType === 'pin' ? quickSecret.length : null;
+      saveConfig(state.config);
+    }
 
     await cacheKeyForQuickUnlock(key, quickSecret);
 

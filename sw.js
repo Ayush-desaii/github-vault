@@ -11,7 +11,7 @@
 
 'use strict';
 
-const CACHE_NAME = 'vault-v1';
+const CACHE_NAME = 'vault-v2';
 
 const APP_SHELL = [
   './',
@@ -57,8 +57,12 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // Always network for GitHub API — vault reads/writes must be live
-  if (url.hostname === 'api.github.com' || url.hostname === 'www.google.com') {
+  // Always network for GitHub API and vault.enc — vault reads/writes must be live
+  if (
+    url.hostname === 'api.github.com' ||
+    url.hostname === 'www.google.com' ||
+    url.pathname.endsWith('vault.enc')
+  ) {
     event.respondWith(fetch(event.request));
     return;
   }

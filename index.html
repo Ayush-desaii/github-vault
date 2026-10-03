@@ -112,12 +112,43 @@
           <circle cx="10" cy="13.5" r="1" fill="currentColor" stroke="none"/>
         </svg>
       </div>
-      <h1>Set up Vault</h1>
-      <div class="step-dots">
+      <h1 id="setup-title">Set up Vault</h1>
+
+      <div class="toggle-group" id="setup-mode-toggle" style="margin: 14px 0 16px;">
+        <button type="button" class="toggle-opt active" id="mode-create-btn">Create New Vault</button>
+        <button type="button" class="toggle-opt" id="mode-connect-btn">Connect Existing</button>
+      </div>
+
+      <div class="step-dots" id="setup-step-dots">
         <span class="step-dot active" data-step="1"></span>
         <span class="step-dot"        data-step="2"></span>
         <span class="step-dot"        data-step="3"></span>
       </div>
+    </div>
+
+    <!-- Connect Existing Vault Step -->
+    <div class="setup-step hidden" id="setup-connect-step">
+      <h2>Connect to GitHub</h2>
+      <p class="hint">Enter the repository where your encrypted <code>vault.enc</code> is stored. The PAT is loaded from inside your vault upon unlocking.</p>
+      <div class="field">
+        <label>GitHub username</label>
+        <input type="text" id="connect-gh-owner" placeholder="your-username" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>Repository name</label>
+        <input type="text" id="connect-gh-repo" placeholder="github-vault" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label>Personal access token <span style="color:var(--t3);font-weight:normal">(Optional — only if private)</span></label>
+        <div class="input-wrap">
+          <input type="password" id="connect-gh-pat" placeholder="Leave blank if repo is public" autocomplete="off" />
+          <button class="toggle-pw" data-target="connect-gh-pat">
+            <svg class="ic ic-sm"><use href="#ic-eye"/></svg>
+          </button>
+        </div>
+      </div>
+      <p class="error-msg hidden" id="connect-step-error"></p>
+      <button class="btn-primary" id="connect-step-btn">Connect &amp; Unlock</button>
     </div>
 
     <!-- Step 1 -->
@@ -232,6 +263,7 @@
       </svg>
     </div>
     <h1>Vault</h1>
+    <p id="unlock-repo-label" class="hint small" style="text-align:center;margin-top:-6px;margin-bottom:12px;color:var(--t2);display:none;"></p>
 
     <div id="unlock-full" style="width:100%">
       <div style="display:flex;flex-direction:column;gap:12px">
@@ -245,8 +277,14 @@
           </div>
         </div>
         <div id="unlock-quick-input-wrap"></div>
+        <div id="unlock-type-switch-wrap" style="text-align:center;margin-top:-2px">
+          <button type="button" class="btn-link" id="unlock-type-toggle-btn" style="font-size:12px">Using pattern? Switch to pattern</button>
+        </div>
         <p class="error-msg hidden" id="unlock-error"></p>
         <button class="btn-primary" id="unlock-btn">Unlock</button>
+        <div style="text-align:center;margin-top:4px">
+          <button type="button" class="btn-link" id="unlock-switch-vault-btn" style="font-size:11px;color:var(--t3)">Connect different repository</button>
+        </div>
       </div>
     </div>
 
@@ -444,8 +482,18 @@
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js')
-        .catch(err => console.warn('SW registration failed:', err));
+      navigator.serviceWorker.register('./sw.js').then(reg => {
+        reg.addEventListener('updatefound', () => {
+          const newWorker = reg.installing;
+          if (newWorker) {
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'activated') {
+                window.location.reload();
+              }
+            });
+          }
+        });
+      }).catch(err => console.warn('SW registration failed:', err));
     });
   }
 </script>
