@@ -31,6 +31,10 @@ const state = {
   // AES-256-GCM CryptoKey (null when locked)
   vaultKey: null,
 
+  // Temporary in-memory master secret (masterPw + \x00 + quickSecret)
+  // Wiped immediately upon lock
+  masterSecret: null,
+
   // Uint8Array — PBKDF2 salt embedded in vault.enc (stays constant for this vault)
   vaultSalt: null,
 
@@ -181,10 +185,28 @@ function showUnlockScreen() {
   }
 
   showScreen('unlock');
+
+  const bioEnrolled = typeof Biometrics !== 'undefined' && Biometrics.isEnrolled();
+  const quickBioBtn = document.getElementById('unlock-quick-bio-btn');
+  const fullBioBtn  = document.getElementById('unlock-full-bio-btn');
+
+  if (quickBioBtn) quickBioBtn.classList.toggle('hidden', !bioEnrolled);
+  if (fullBioBtn)  fullBioBtn.classList.toggle('hidden', !bioEnrolled);
+
   if (wrappedKey) {
-    showQuickOnlyUnlock(config.quick_unlock_type || 'pin');
+    showQuickOnlyUnlock(config?.quick_unlock_type || 'pin');
   } else {
-    showFullUnlock(config.quick_unlock_type || 'pin');
+    showFullUnlock(config?.quick_unlock_type || 'pin');
+  }
+
+  // If biometrics is enrolled, prompt for Face ID / Fingerprint automatically
+  if (bioEnrolled) {
+    setTimeout(() => {
+      // Only auto-trigger if still on unlock screen
+      if (state.screen === 'unlock') {
+        triggerBiometricUnlock();
+      }
+    }, 350);
   }
 }
 
@@ -534,9 +556,10 @@ function initSetupWizard() {
         state.vault     = data;
         if (state.vault && !state.vault.notes) state.vault.notes = [];
         if (state.vault && !state.vault.docs) state.vault.docs = [];
-        state.vaultKey  = key;
-        state.vaultSalt = salt;
-        state.vaultBlob = blob;
+        state.vaultKey     = key;
+        state.vaultSalt    = salt;
+        state.masterSecret = masterSecret;
+        state.vaultBlob    = blob;
         state.vaultSha  = sha;
         sessionSet('vault_sha', sha);
 
@@ -587,10 +610,11 @@ function initSetupWizard() {
       saveConfig(config);
 
       // 7. Load vault into state for immediate use
-      state.vault     = initialVaultData;
-      state.vaultKey  = key;
-      state.vaultSalt = salt;
-      state.vaultBlob = blob;
+      state.vault        = initialVaultData;
+      state.vaultKey     = key;
+      state.vaultSalt    = salt;
+      state.masterSecret = masterSecret;
+      state.vaultBlob    = blob;
       state.vaultSha  = newSha;
       sessionSet('vault_sha', newSha);
 
@@ -796,9 +820,10 @@ async function handleFullUnlock(quickType) {
     state.vault     = data;
     if (state.vault && !state.vault.notes) state.vault.notes = [];
     if (state.vault && !state.vault.docs)  state.vault.docs  = [];
-    state.vaultKey  = key;
-    state.vaultSalt = salt;
-    state.vaultSha  = sessionGet('vault_sha');
+    state.vaultKey     = key;
+    state.vaultSalt    = salt;
+    state.vaultSha     = sessionGet('vault_sha');
+    state.masterSecret = masterSecret;
 
     // Persist quick unlock preferences in config
     if (state.config) {
@@ -886,14 +911,15 @@ async function cacheKeyForQuickUnlock(key, quickSecret) {
 
 function lockVault() {
   // Hide all modals so orphaned dialogs don't stay visible on locked screen
-  ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer'].forEach(id => {
+  ['modal-entry', 'modal-generator', 'modal-import', 'modal-doc', 'modal-doc-viewer', 'modal-settings'].forEach(id => {
     hideModal(id);
   });
 
   // Clear sensitive state from memory
-  state.vault     = null;
-  state.vaultKey  = null;
-  state.vaultSalt = null;
+  state.vault        = null;
+  state.vaultKey     = null;
+  state.vaultSalt    = null;
+  state.masterSecret = null;
 
   // Persist the latest blob in sessionStorage so quick-unlock
   // can decrypt without a network round-trip.
@@ -901,15 +927,7 @@ function lockVault() {
     sessionSet('vault_blob', state.vaultBlob);
   }
 
-  const quickType = state.config?.quick_unlock_type || 'pin';
-  showScreen('unlock');
-
-  const wrappedKey = sessionGet('wrapped_key');
-  if (wrappedKey) {
-    showQuickOnlyUnlock(quickType);
-  } else {
-    showFullUnlock(quickType);
-  }
+  showUnlockScreen();
 }
 
 // ─── Vault CRUD ───────────────────────────────────────────────────────────────
@@ -2048,6 +2066,173 @@ function regeneratePassword() {
   document.getElementById('gen-pw-output').textContent = pw;
 }
 
+// ─── Biometrics & Settings ───────────────────────────────────────────────────
+
+async function triggerBiometricUnlock() {
+  const isQuickOnly = state.screen === 'unlock' && !document.getElementById('unlock-quick-only').classList.contains('hidden');
+  const errEl = isQuickOnly
+    ? document.getElementById('unlock-quick-error')
+    : document.getElementById('unlock-error');
+
+  const btn = isQuickOnly
+    ? document.getElementById('unlock-quick-bio-btn')
+    : document.getElementById('unlock-full-bio-btn');
+
+  if (btn) btn.classList.add('btn-loading');
+
+  try {
+    const masterSecret = await Biometrics.unlock();
+    if (!masterSecret) return;
+
+    let blob = state.vaultBlob || sessionGet('vault_blob');
+    if (!blob) {
+      setLoadingMsg('Fetching encrypted vault…');
+      const { blob: fetchedBlob, sha } = await GitHub.fetchVault(
+        state.config.github_owner,
+        state.config.github_repo,
+        state.config.github_path || 'vault.enc'
+      );
+      blob = fetchedBlob;
+      state.vaultBlob = blob;
+      state.vaultSha  = sha;
+      sessionSet('vault_sha', sha);
+    }
+
+    const { data, key, salt } = await Crypto.decryptVault(blob, masterSecret);
+
+    state.vault        = data;
+    if (state.vault && !state.vault.notes) state.vault.notes = [];
+    if (state.vault && !state.vault.docs)  state.vault.docs  = [];
+    state.vaultKey     = key;
+    state.vaultSalt    = salt;
+    state.vaultBlob    = blob;
+    state.vaultSha     = state.vaultSha || sessionGet('vault_sha');
+    state.masterSecret = masterSecret;
+
+    // Cache wrapped key for quick session unlock
+    const parts = masterSecret.split('\x00');
+    const quickSecret = parts[1] || '';
+    if (quickSecret) {
+      await cacheKeyForQuickUnlock(key, quickSecret);
+    }
+
+    showScreen('vault');
+    renderActiveTab();
+    Toast.success('Unlocked with Biometrics');
+
+  } catch (err) {
+    if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+      console.log('Biometric prompt was dismissed.');
+    } else {
+      console.warn('Biometric unlock failed:', err);
+      if (errEl) {
+        showErr(errEl, err.message === 'DECRYPT_FAILED'
+          ? 'Biometric data could not be decrypted. Please unlock with master password.'
+          : (err.message || 'Biometric unlock failed.')
+        );
+      }
+    }
+  } finally {
+    if (btn) btn.classList.remove('btn-loading');
+  }
+}
+
+async function openSettingsModal() {
+  const isEnrolled = typeof Biometrics !== 'undefined' && Biometrics.isEnrolled();
+  const isAvail    = typeof Biometrics !== 'undefined' && await Biometrics.isAvailable();
+
+  const badge      = document.getElementById('settings-bio-status-badge');
+  const toggleBtn  = document.getElementById('settings-bio-toggle-btn');
+  const toggleLbl  = document.getElementById('settings-bio-toggle-label');
+  const msgEl      = document.getElementById('settings-bio-msg');
+
+  if (badge) badge.style.display = isEnrolled ? 'inline-block' : 'none';
+
+  if (!isAvail && !isEnrolled) {
+    if (toggleBtn) {
+      toggleBtn.disabled = true;
+      toggleBtn.className = 'btn-secondary btn-sm';
+    }
+    if (toggleLbl) toggleLbl.textContent = 'Not Supported on Device';
+    if (msgEl) {
+      msgEl.textContent = 'Face ID, Touch ID, or fingerprint sensors are not available in this browser.';
+      msgEl.style.display = 'block';
+    }
+  } else if (isEnrolled) {
+    if (toggleBtn) {
+      toggleBtn.disabled = false;
+      toggleBtn.className = 'btn-danger btn-sm';
+    }
+    if (toggleLbl) toggleLbl.textContent = 'Disable Biometrics';
+    if (msgEl) {
+      msgEl.textContent = 'Active: You can unlock this vault using your biometric sensor.';
+      msgEl.style.display = 'block';
+    }
+  } else {
+    if (toggleBtn) {
+      toggleBtn.disabled = false;
+      toggleBtn.className = 'btn-primary btn-sm';
+    }
+    if (toggleLbl) toggleLbl.textContent = 'Enable Biometric Unlock';
+    if (msgEl) {
+      msgEl.style.display = 'none';
+    }
+  }
+
+  // Quick mode info
+  const quickLabel = document.getElementById('settings-quick-mode-label');
+  if (quickLabel) {
+    quickLabel.textContent = (state.config?.quick_unlock_type || 'PIN').toUpperCase();
+  }
+
+  // Repository info
+  const repoName = document.getElementById('settings-repo-name');
+  if (repoName && state.config?.github_owner) {
+    repoName.textContent = `${state.config.github_owner}/${state.config.github_repo || 'vault'}`;
+  }
+
+  showModal('modal-settings');
+}
+
+async function handleToggleBiometrics() {
+  const btn = document.getElementById('settings-bio-toggle-btn');
+  if (!btn) return;
+
+  if (Biometrics.isEnrolled()) {
+    Biometrics.disable();
+    Toast.info('Biometric unlock disabled.');
+    openSettingsModal();
+    return;
+  }
+
+  let secret = state.masterSecret;
+  if (!secret) {
+    const pw = prompt('Please enter your Master Password to enable biometrics on this device:');
+    if (!pw) return;
+    const qSecret = state.config?.quick_unlock_type === 'pattern'
+      ? prompt('Please enter your pattern coordinates (or PIN):')
+      : prompt('Please enter your PIN:');
+    if (!qSecret) return;
+    secret = pw + '\x00' + qSecret;
+  }
+
+  btn.classList.add('btn-loading');
+  try {
+    await Biometrics.enroll(secret, state.config?.github_owner || 'Vault User');
+    state.masterSecret = secret;
+    Toast.success('Biometric unlock enabled!');
+    openSettingsModal();
+  } catch (err) {
+    if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+      Toast.error('Biometric verification cancelled.');
+    } else {
+      Toast.error(`Enrollment failed: ${err.message}`);
+    }
+  } finally {
+    btn.classList.remove('btn-loading');
+  }
+}
+
 // ─── Event Wiring ─────────────────────────────────────────────────────────────
 
 function initEventListeners() {
@@ -2065,6 +2250,24 @@ function initEventListeners() {
   document.getElementById('bottom-tab-passwords')?.addEventListener('click', () => switchVaultTab('passwords'));
   document.getElementById('bottom-tab-journal')?.addEventListener('click', () => switchVaultTab('journal'));
   document.getElementById('bottom-tab-docs')?.addEventListener('click', () => switchVaultTab('docs'));
+
+  // ── Settings modal ────────────────────────────────────────────────────────
+  document.getElementById('vault-settings-btn')?.addEventListener('click', openSettingsModal);
+  document.getElementById('modal-settings-close')?.addEventListener('click', () => hideModal('modal-settings'));
+  document.getElementById('settings-bio-toggle-btn')?.addEventListener('click', handleToggleBiometrics);
+  document.getElementById('settings-switch-quick-btn')?.addEventListener('click', () => {
+    hideModal('modal-settings');
+    const newType = state.config?.quick_unlock_type === 'pattern' ? 'pin' : 'pattern';
+    if (confirm(`Switch session quick unlock to ${newType.toUpperCase()}?`)) {
+      state.config.quick_unlock_type = newType;
+      saveConfig(state.config);
+      Toast.success(`Quick unlock set to ${newType.toUpperCase()}`);
+    }
+  });
+
+  // ── Biometric unlock buttons on unlock screens ────────────────────────────
+  document.getElementById('unlock-quick-bio-btn')?.addEventListener('click', triggerBiometricUnlock);
+  document.getElementById('unlock-full-bio-btn')?.addEventListener('click', triggerBiometricUnlock);
 
   // ── Vault screen ──────────────────────────────────────────────────────────
   document.getElementById('vault-add-btn')?.addEventListener('click', () => {

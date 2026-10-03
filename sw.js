@@ -11,13 +11,14 @@
 
 'use strict';
 
-const CACHE_NAME = 'vault-v7';
+const CACHE_NAME = 'vault-v8';
 
 const APP_SHELL = [
   './',
   './index.html',
   './style.css',
   './app.js',
+  './biometrics.js',
   './crypto.js',
   './github.js',
   './ui.js',

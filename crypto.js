@@ -323,14 +323,79 @@ const Crypto = (() => {
     return { score, label: labels[score] };
   }
 
+  // ─── Biometric Payload Helpers ────────────────────────────────────────────
+
+  /**
+   * Encrypt a text string (such as masterSecret) with a 256-bit raw key using AES-256-GCM.
+   * Format: base64 [12 bytes IV] [ciphertext]
+   *
+   * @param {string}     secretText
+   * @param {Uint8Array} rawKeyBytes 32-byte key
+   * @returns {Promise<string>} base64 blob
+   */
+  async function encryptSecretWithKey(secretText, rawKeyBytes) {
+    const iv = randomBytes(IV_LEN);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      rawKeyBytes,
+      { name: AES_ALG, length: AES_KEY_LEN },
+      false,
+      ['encrypt']
+    );
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: AES_ALG, iv },
+      key,
+      new TextEncoder().encode(secretText)
+    );
+    const out = new Uint8Array(IV_LEN + ciphertext.byteLength);
+    out.set(iv, 0);
+    out.set(new Uint8Array(ciphertext), IV_LEN);
+    return bytesToB64(out);
+  }
+
+  /**
+   * Decrypt a base64 ciphertext with a 256-bit raw key using AES-256-GCM.
+   *
+   * @param {string}     b64Encrypted
+   * @param {Uint8Array} rawKeyBytes 32-byte key
+   * @returns {Promise<string>} decrypted text
+   */
+  async function decryptSecretWithKey(b64Encrypted, rawKeyBytes) {
+    const bytes = b64ToBytes(b64Encrypted);
+    const iv = bytes.slice(0, IV_LEN);
+    const ciphertext = bytes.slice(IV_LEN);
+    const key = await crypto.subtle.importKey(
+      'raw',
+      rawKeyBytes,
+      { name: AES_ALG, length: AES_KEY_LEN },
+      false,
+      ['decrypt']
+    );
+    try {
+      const decrypted = await crypto.subtle.decrypt(
+        { name: AES_ALG, iv },
+        key,
+        ciphertext
+      );
+      return new TextDecoder().decode(decrypted);
+    } catch {
+      throw new Error('DECRYPT_FAILED');
+    }
+  }
+
   // ─── Public API ───────────────────────────────────────────────────────────
 
   return {
+    randomBytes,
+    b64ToBytes,
+    bytesToB64,
     createVault,
     encryptVault,
     decryptVault,
     encryptBinary,
     decryptBinary,
+    encryptSecretWithKey,
+    decryptSecretWithKey,
     wrapKey,
     unwrapKey,
     generatePassword,
