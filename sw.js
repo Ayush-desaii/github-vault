@@ -11,7 +11,7 @@
 
 'use strict';
 
-const CACHE_NAME = 'vault-v11';
+const CACHE_NAME = 'vault-v12';
 
 const APP_SHELL = [
   './',

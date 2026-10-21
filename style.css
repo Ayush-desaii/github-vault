@@ -3089,3 +3089,293 @@ input[type="range"] {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* ─── Passwords Multi-Account Grouping & Sub-Filter Bar ─────────────────────── */
+
+.passwords-subfilter-bar {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  margin-top: -2px;
+}
+
+.passwords-subfilter-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.passwords-subfilter-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.passwords-subfilter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 500;
+  border-radius: var(--r-full);
+  background: var(--bg-1);
+  color: var(--t2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--t);
+  user-select: none;
+}
+
+.passwords-subfilter-pill:hover {
+  background: var(--bg-2);
+  color: var(--w);
+  border-color: var(--line2);
+}
+
+.passwords-subfilter-pill.active {
+  background: var(--accent-subtle, rgba(56, 189, 248, 0.15));
+  color: var(--accent, #38bdf8);
+  border-color: rgba(56, 189, 248, 0.35);
+  font-weight: 600;
+}
+
+/* Platform Group Card */
+.platform-group-card {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  margin-bottom: 8px;
+  overflow: hidden;
+  transition: border-color var(--t), box-shadow var(--t);
+}
+
+.platform-group-card:hover {
+  border-color: var(--line2);
+}
+
+.platform-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-1);
+  cursor: pointer;
+  user-select: none;
+  transition: background var(--t);
+}
+
+.platform-group-header:hover {
+  background: var(--bg-2);
+}
+
+.platform-group-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.platform-group-titles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.platform-group-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.platform-group-title {
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--w);
+}
+
+.platform-count-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  background: rgba(56, 189, 248, 0.14);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.28);
+}
+
+.platform-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-add-subaccount {
+  color: var(--t2);
+  transition: color var(--t);
+}
+
+.btn-add-subaccount:hover {
+  color: #22c55e;
+}
+
+.chevron-icon {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chevron-icon.rotated {
+  transform: rotate(180deg);
+}
+
+/* Sub-Accounts List */
+.platform-subaccounts-list {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-0);
+  border-top: 1px solid var(--line);
+}
+
+.platform-subaccounts-list.collapsed {
+  display: none;
+}
+
+.platform-subaccount-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px 10px 32px;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  cursor: pointer;
+  transition: background var(--t);
+}
+
+.platform-subaccount-row:last-child {
+  border-bottom: none;
+}
+
+.platform-subaccount-row:hover {
+  background: var(--bg-1);
+}
+
+/* Tree-node guide branch on the left */
+.platform-subaccount-row::before {
+  content: "";
+  position: absolute;
+  left: 20px;
+  top: 0;
+  bottom: 50%;
+  width: 1px;
+  background: var(--line2);
+}
+
+.platform-subaccount-row::after {
+  content: "";
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  width: 6px;
+  height: 1px;
+  background: var(--line2);
+}
+
+.subaccount-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--bg-2);
+  border: 1px solid var(--line2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--t3);
+  flex-shrink: 0;
+}
+
+.subaccount-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subaccount-top-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.subaccount-email {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--w);
+  word-break: break-all;
+}
+
+.account-label-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  background: rgba(168, 85, 247, 0.14);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.28);
+}
+
+.account-folder-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--r-full);
+  background: var(--bg-2);
+  color: var(--t2);
+  border: 1px solid var(--line);
+}
+
+/* Email & Folder Section Headings (when grouped) */
+.email-section-group {
+  margin-bottom: 16px;
+}
+
+.email-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+
+.email-section-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(56, 189, 248, 0.12);
+  color: #38bdf8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.email-section-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--w);
+  word-break: break-all;
+}
+
+.email-section-count {
+  font-size: 11px;
+  color: var(--t3);
+  margin-left: auto;
+  font-weight: 500;
+}

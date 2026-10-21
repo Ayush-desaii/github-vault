@@ -943,22 +943,154 @@ function lockVault() {
   showUnlockScreen();
 }
 
-// ─── Vault CRUD ───────────────────────────────────────────────────────────────
+// ─── Vault CRUD & Multi-Account Grouping ──────────────────────────────────────
+
+function getPlatformKey(entry) {
+  if (entry.url) {
+    try {
+      const u = entry.url.startsWith('http') ? entry.url : 'https://' + entry.url;
+      const host = new URL(u).hostname.toLowerCase().replace(/^www\./, '');
+      if (host) return host;
+    } catch {}
+  }
+  return (entry.name || 'other').trim().toLowerCase();
+}
+
+function getPlatformInfo(entriesGroup) {
+  const first = entriesGroup[0] || {};
+  const name = first.name || 'Unknown';
+  let domain = '';
+  let url = first.url || '';
+  if (url) {
+    try {
+      domain = new URL(url.startsWith('http') ? url : 'https://' + url).hostname.replace(/^www\./, '');
+    } catch {
+      domain = url;
+    }
+  }
+  return { name, domain, url };
+}
+
+function updateFolderDatalist() {
+  const datalist = document.getElementById('folder-suggestions');
+  if (!datalist) return;
+  const folders = new Set();
+  (state.vault?.entries || []).forEach(e => {
+    if (e.folder && e.folder.trim()) folders.add(e.folder.trim());
+  });
+  ['Personal', 'Work', 'Finance', 'Social', 'Development'].forEach(f => folders.add(f));
+
+  datalist.innerHTML = Array.from(folders)
+    .sort()
+    .map(f => '<option value="' + escapeHtml(f) + '">')
+    .join('');
+}
+
+function updatePasswordsSubfilterBar() {
+  const bar = document.getElementById('passwords-subfilter-bar');
+  const scroll = document.getElementById('passwords-subfilter-pills');
+  if (!bar || !scroll) return;
+
+  const entries = state.vault?.entries || [];
+
+  if (state.pwdGroupMode === 'emails') {
+    bar.classList.remove('hidden');
+
+    const emailCounts = new Map();
+    entries.forEach(e => {
+      const email = (e.username || '').trim();
+      if (email) {
+        emailCounts.set(email, (emailCounts.get(email) || 0) + 1);
+      }
+    });
+
+    const sortedEmails = Array.from(emailCounts.entries()).sort((a, b) => b[1] - a[1]);
+
+    const isAll = state.pwdEmailFilter === 'all';
+    const allPill = '<button type="button" class="passwords-subfilter-pill ' + (isAll ? 'active' : '') + '" data-subfilter-email="all">All Emails (' + entries.length + ')</button>';
+    const emailPills = sortedEmails.map(([email, count]) => {
+      const isAct = state.pwdEmailFilter.toLowerCase() === email.toLowerCase();
+      return '<button type="button" class="passwords-subfilter-pill ' + (isAct ? 'active' : '') + '" data-subfilter-email="' + escapeHtml(email) + '">'
+        + '<svg class="ic ic-sm" style="width:12px;height:12px;"><use href="#ic-user"/></svg>'
+        + '<span>' + escapeHtml(email) + '</span>'
+        + '<span style="opacity:0.6;font-size:10.5px">(' + count + ')</span>'
+        + '</button>';
+    }).join('');
+
+    scroll.innerHTML = allPill + emailPills;
+
+    scroll.querySelectorAll('[data-subfilter-email]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.pwdEmailFilter = btn.dataset.subfilterEmail;
+        renderVaultList();
+      });
+    });
+
+  } else if (state.pwdGroupMode === 'folders') {
+    bar.classList.remove('hidden');
+
+    const folderCounts = new Map();
+    entries.forEach(e => {
+      const folder = (e.folder || 'Unfiled').trim();
+      folderCounts.set(folder, (folderCounts.get(folder) || 0) + 1);
+    });
+
+    const sortedFolders = Array.from(folderCounts.entries()).sort((a, b) => b[1] - a[1]);
+
+    const isAll = state.pwdFolderFilter === 'all';
+    const allPill = '<button type="button" class="passwords-subfilter-pill ' + (isAll ? 'active' : '') + '" data-subfilter-folder="all">All Folders (' + entries.length + ')</button>';
+    const folderPills = sortedFolders.map(([folder, count]) => {
+      const isAct = state.pwdFolderFilter.toLowerCase() === folder.toLowerCase();
+      return '<button type="button" class="passwords-subfilter-pill ' + (isAct ? 'active' : '') + '" data-subfilter-folder="' + escapeHtml(folder) + '">'
+        + '<svg class="ic ic-sm" style="width:12px;height:12px;"><use href="#ic-folder"/></svg>'
+        + '<span>' + escapeHtml(folder) + '</span>'
+        + '<span style="opacity:0.6;font-size:10.5px">(' + count + ')</span>'
+        + '</button>';
+    }).join('');
+
+    scroll.innerHTML = allPill + folderPills;
+
+    scroll.querySelectorAll('[data-subfilter-folder]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.pwdFolderFilter = btn.dataset.subfilterFolder;
+        renderVaultList();
+      });
+    });
+
+  } else {
+    bar.classList.add('hidden');
+    scroll.innerHTML = '';
+  }
+}
 
 function renderVaultList() {
   const container = document.getElementById('vault-list');
   const q         = state.searchQuery.toLowerCase().trim();
   const entries   = state.vault?.entries || [];
 
-  const filtered = q
+  // 1. Text Search Filter
+  let filtered = q
     ? entries.filter(e =>
         e.name.toLowerCase().includes(q) ||
-        e.username.toLowerCase().includes(q) ||
-        (e.url || '').toLowerCase().includes(q)
+        (e.username || '').toLowerCase().includes(q) ||
+        (e.url || '').toLowerCase().includes(q) ||
+        (e.notes || '').toLowerCase().includes(q) ||
+        (e.folder || '').toLowerCase().includes(q) ||
+        (e.label || '').toLowerCase().includes(q)
       )
     : entries;
 
-  // Sort: most recently updated first
+  // 2. Email Identity Sub-Filter
+  if (state.pwdGroupMode === 'emails' && state.pwdEmailFilter !== 'all') {
+    filtered = filtered.filter(e => (e.username || '').toLowerCase() === state.pwdEmailFilter.toLowerCase());
+  }
+
+  // 3. Folder / Collection Sub-Filter
+  if (state.pwdGroupMode === 'folders' && state.pwdFolderFilter !== 'all') {
+    filtered = filtered.filter(e => (e.folder || 'Unfiled').toLowerCase() === state.pwdFolderFilter.toLowerCase());
+  }
+
+  // 4. Sort: most recently updated first
   const sorted = [...filtered].sort((a, b) =>
     new Date(b.updated_at) - new Date(a.updated_at)
   );
@@ -968,9 +1100,10 @@ function renderVaultList() {
   if (countBadge) {
     const total = entries.length;
     const shown = sorted.length;
-    countBadge.textContent = q ? `${shown} of ${total}` : `${total} item${total !== 1 ? 's' : ''}`;
+    countBadge.textContent = q ? shown + ' of ' + total : total + ' item' + (total !== 1 ? 's' : '');
   }
   updateNavBadges();
+  updatePasswordsSubfilterBar();
 
   if (sorted.length === 0) {
     container.innerHTML = `
@@ -982,7 +1115,7 @@ function renderVaultList() {
               : '<circle cx="6" cy="6.5" r="3.5"/><path d="M9 9l5 5M12 12l-1.5 1.5"/>'}
           </svg>
         </div>
-        <h3>${q ? `No results for "${escapeHtml(q)}"` : 'Your vault is empty'}</h3>
+        <h3>${q ? 'No results for "' + escapeHtml(q) + '"' : 'Your vault is empty'}</h3>
         <p>${q ? 'Try a different search.' : 'Press + to add your first password.'}</p>
       </div>
     `;
@@ -991,35 +1124,32 @@ function renderVaultList() {
 
   container.innerHTML = '';
 
-  // SVG icon strings reused in each card
-  const svgCopy   = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M2 11V2h9"/></svg>`;
-  const svgEdit   = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 2 3 3-8 8H3v-3l8-8z"/></svg>`;
-  const svgShield = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l6 2.5v4.5c0 4-3 6.5-6 7.5-3-1-6-3.5-6-7.5V4l6-2.5z"/><path d="M5.5 8l2 2 3.5-3.5"/></svg>`;
+  const svgCopy   = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M2 11V2h9"/></svg>';
+  const svgEdit   = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 2 3 3-8 8H3v-3l8-8z"/></svg>';
+  const svgShield = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l6 2.5v4.5c0 4-3 6.5-6 7.5-3-1-6-3.5-6-7.5V4l6-2.5z"/><path d="M5.5 8l2 2 3.5-3.5"/></svg>';
 
-  sorted.forEach(entry => {
-    const card = document.createElement('div');
-    card.className = 'entry-card';
-    card.dataset.id = entry.id;
-
-    // Icon: favicon if URL available, else first letter of name
+  // Helper: build HTML for a single entry card
+  function buildSingleCardHtml(entry) {
     const fav    = entry.url ? favicon(entry.url) : null;
     const letter = escapeHtml((entry.name || '?')[0].toUpperCase());
 
     const iconContent = fav
-      ? `<img src="${fav}" alt="" onerror="this.style.display='none';this.nextSibling.style.display='flex'">`
-        + `<span style="display:none;align-items:center;justify-content:center;width:100%;height:100%">${letter}</span>`
+      ? '<img src="' + fav + '" alt="" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">'
+        + '<span style="display:none;align-items:center;justify-content:center;width:100%;height:100%">' + letter + '</span>'
       : letter;
 
     let cleanDomain = '';
     if (entry.url) {
       try {
-        cleanDomain = new URL(entry.url.startsWith('http') ? entry.url : `https://${entry.url}`).hostname.replace(/^www\./, '');
+        cleanDomain = new URL(entry.url.startsWith('http') ? entry.url : 'https://' + entry.url).hostname.replace(/^www\./, '');
       } catch {
         cleanDomain = entry.url;
       }
     }
 
-    const domainDisplay = cleanDomain ? `<span class="entry-url">${escapeHtml(cleanDomain)}</span>` : '';
+    const domainDisplay = cleanDomain ? '<span class="entry-url">' + escapeHtml(cleanDomain) + '</span>' : '';
+    const labelBadge = entry.label ? '<span class="account-label-badge">' + escapeHtml(entry.label) + '</span>' : '';
+    const folderBadge = entry.folder ? '<span class="account-folder-badge">' + escapeHtml(entry.folder) + '</span>' : '';
 
     let totpHtml = '';
     let totpActionBtn = '';
@@ -1040,34 +1170,215 @@ function renderVaultList() {
           </button>
         </div>
       `;
-      totpActionBtn = `<button class="btn-icon" data-action="copy-totp" data-id="${entry.id}" title="Copy 2FA code" aria-label="Copy 2FA code" style="color:#22c55e">${svgShield}</button>`;
+      totpActionBtn = '<button class="btn-icon" data-action="copy-totp" data-id="' + entry.id + '" title="Copy 2FA code" aria-label="Copy 2FA code" style="color:#22c55e">' + svgShield + '</button>';
     }
 
-    card.innerHTML = `
-      <div class="entry-icon">${iconContent}</div>
-      <div class="entry-info">
-        <div class="entry-name-row">
-          <span class="entry-name">${escapeHtml(entry.name)}</span>
-          ${domainDisplay}
+    return `
+      <div class="entry-card" data-id="${entry.id}">
+        <div class="entry-icon">${iconContent}</div>
+        <div class="entry-info">
+          <div class="entry-name-row">
+            <span class="entry-name">${escapeHtml(entry.name)}</span>
+            ${domainDisplay}
+            ${labelBadge}
+            ${folderBadge}
+          </div>
+          <div class="entry-username">${escapeHtml(entry.username)}</div>
+          ${totpHtml}
         </div>
-        <div class="entry-username">${escapeHtml(entry.username)}</div>
-        ${totpHtml}
-      </div>
-      <div class="entry-actions">
-        ${totpActionBtn}
-        <button class="btn-icon" data-action="copy" data-id="${entry.id}" title="Copy password" aria-label="Copy password">${svgCopy}</button>
-        <button class="btn-icon" data-action="edit" data-id="${entry.id}" title="Edit" aria-label="Edit entry">${svgEdit}</button>
+        <div class="entry-actions">
+          ${totpActionBtn}
+          <button class="btn-icon" data-action="copy" data-id="${entry.id}" title="Copy password" aria-label="Copy password">${svgCopy}</button>
+          <button class="btn-icon" data-action="edit" data-id="${entry.id}" title="Edit" aria-label="Edit entry">${svgEdit}</button>
+        </div>
       </div>
     `;
+  }
 
-    card.addEventListener('click', e => {
-      if (e.target.closest('[data-action]')) return;
-      openEditModal(entry.id);
+  // Helper: build HTML for multi-account platform group card
+  function buildPlatformGroupHtml(platformKey, accounts) {
+    const { name, domain, url } = getPlatformInfo(accounts);
+    const fav    = url ? favicon(url) : null;
+    const letter = escapeHtml((name || '?')[0].toUpperCase());
+
+    const iconContent = fav
+      ? '<img src="' + fav + '" alt="" onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">'
+        + '<span style="display:none;align-items:center;justify-content:center;width:100%;height:100%">' + letter + '</span>'
+      : letter;
+
+    const domainDisplay = domain ? '<span class="entry-url">' + escapeHtml(domain) + '</span>' : '';
+    const isCollapsed = state.collapsedPlatformGroups.has(platformKey);
+
+    const subAccountsHtml = accounts.map(entry => {
+      const labelBadge = entry.label ? '<span class="account-label-badge">' + escapeHtml(entry.label) + '</span>' : '';
+      const folderBadge = entry.folder ? '<span class="account-folder-badge">' + escapeHtml(entry.folder) + '</span>' : '';
+
+      let totpHtml = '';
+      let totpActionBtn = '';
+      if (entry.totp) {
+        totpHtml = `
+          <div class="entry-totp-row" style="margin-top:2px;">
+            <button type="button" class="entry-totp-chip" data-action="copy-totp" data-id="${entry.id}" title="Click to copy 2FA code">
+              <svg class="totp-chip-icon" viewBox="0 0 16 16"><use href="#ic-shield-check"/></svg>
+              <span class="totp-chip-label">2FA</span>
+              <span class="totp-chip-code" data-totp-code="${entry.id}">--- ---</span>
+              <span class="totp-chip-timer">
+                <svg class="totp-ring-svg" viewBox="0 0 20 20">
+                  <circle class="totp-ring-bg" cx="10" cy="10" r="7"/>
+                  <circle class="totp-ring-progress" cx="10" cy="10" r="7" data-totp-ring="${entry.id}"/>
+                </svg>
+                <span class="totp-chip-sec" data-totp-sec="${entry.id}">--s</span>
+              </span>
+            </button>
+          </div>
+        `;
+        totpActionBtn = '<button class="btn-icon" data-action="copy-totp" data-id="' + entry.id + '" title="Copy 2FA code" aria-label="Copy 2FA code" style="color:#22c55e">' + svgShield + '</button>';
+      }
+
+      return `
+        <div class="platform-subaccount-row" data-id="${entry.id}">
+          <div class="subaccount-avatar">
+            <svg class="ic ic-sm" style="width:13px;height:13px;"><use href="#ic-user"/></svg>
+          </div>
+          <div class="subaccount-info">
+            <div class="subaccount-top-row">
+              <span class="subaccount-email">${escapeHtml(entry.username)}</span>
+              ${labelBadge}
+              ${folderBadge}
+            </div>
+            ${totpHtml}
+          </div>
+          <div class="entry-actions">
+            ${totpActionBtn}
+            <button class="btn-icon" data-action="copy" data-id="${entry.id}" title="Copy password" aria-label="Copy password">${svgCopy}</button>
+            <button class="btn-icon" data-action="edit" data-id="${entry.id}" title="Edit account" aria-label="Edit account">${svgEdit}</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="platform-group-card" data-platform-key="${escapeHtml(platformKey)}">
+        <div class="platform-group-header" data-toggle-key="${escapeHtml(platformKey)}">
+          <div class="platform-group-left">
+            <div class="entry-icon">${iconContent}</div>
+            <div class="platform-group-titles">
+              <div class="platform-group-name-row">
+                <span class="platform-group-title">${escapeHtml(name)}</span>
+                ${domainDisplay}
+                <span class="platform-count-pill">${accounts.length} accounts</span>
+              </div>
+            </div>
+          </div>
+          <div class="platform-group-actions">
+            <button type="button" class="btn-icon btn-add-subaccount" data-action="add-subaccount" data-platform-name="${escapeHtml(name)}" data-platform-url="${escapeHtml(url)}" title="Add another account to ${escapeHtml(name)}" aria-label="Add account">
+              <svg class="ic ic-sm"><use href="#ic-plus"/></svg>
+            </button>
+            <button type="button" class="btn-icon btn-toggle-collapse" data-action="toggle-platform" data-platform-key="${escapeHtml(platformKey)}" title="Expand or collapse accounts">
+              <svg class="ic ic-sm chevron-icon ${isCollapsed ? '' : 'rotated'}"><use href="#ic-chevron-down"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="platform-subaccounts-list ${isCollapsed ? 'collapsed' : ''}" data-list-key="${escapeHtml(platformKey)}">
+          ${subAccountsHtml}
+        </div>
+      </div>
+    `;
+  }
+
+  // ── Render Strategy based on pwdGroupMode ──────────────────────────────────
+  if (state.pwdGroupMode === 'platforms') {
+    // Group by platform
+    const platformMap = new Map();
+    sorted.forEach(entry => {
+      const key = getPlatformKey(entry);
+      if (!platformMap.has(key)) platformMap.set(key, []);
+      platformMap.get(key).push(entry);
     });
 
-    container.appendChild(card);
+    let html = '';
+    for (const [key, accounts] of platformMap.entries()) {
+      if (accounts.length === 1) {
+        html += buildSingleCardHtml(accounts[0]);
+      } else {
+        html += buildPlatformGroupHtml(key, accounts);
+      }
+    }
+    container.innerHTML = html;
+
+  } else if (state.pwdGroupMode === 'emails' && state.pwdEmailFilter === 'all') {
+    // Group by email identity headings
+    const emailMap = new Map();
+    sorted.forEach(entry => {
+      const email = (entry.username || 'No Email').trim();
+      if (!emailMap.has(email)) emailMap.set(email, []);
+      emailMap.get(email).push(entry);
+    });
+
+    let html = '';
+    for (const [email, accounts] of emailMap.entries()) {
+      html += `
+        <div class="email-section-group">
+          <div class="email-section-header">
+            <div class="email-section-icon">
+              <svg class="ic ic-sm"><use href="#ic-user"/></svg>
+            </div>
+            <div class="email-section-title">${escapeHtml(email)}</div>
+            <span class="email-section-count">${accounts.length} password${accounts.length > 1 ? 's' : ''}</span>
+          </div>
+          <div class="email-section-items">
+            ${accounts.map(buildSingleCardHtml).join('')}
+          </div>
+        </div>
+      `;
+    }
+    container.innerHTML = html;
+
+  } else if (state.pwdGroupMode === 'folders' && state.pwdFolderFilter === 'all') {
+    // Group by folder headings
+    const folderMap = new Map();
+    sorted.forEach(entry => {
+      const folder = (entry.folder || 'Unfiled').trim();
+      if (!folderMap.has(folder)) folderMap.set(folder, []);
+      folderMap.get(folder).push(entry);
+    });
+
+    let html = '';
+    for (const [folder, accounts] of folderMap.entries()) {
+      html += `
+        <div class="email-section-group">
+          <div class="email-section-header">
+            <div class="email-section-icon" style="background:rgba(168,85,247,0.12);color:#c084fc;">
+              <svg class="ic ic-sm"><use href="#ic-folder"/></svg>
+            </div>
+            <div class="email-section-title">${escapeHtml(folder)}</div>
+            <span class="email-section-count">${accounts.length} password${accounts.length > 1 ? 's' : ''}</span>
+          </div>
+          <div class="email-section-items">
+            ${accounts.map(buildSingleCardHtml).join('')}
+          </div>
+        </div>
+      `;
+    }
+    container.innerHTML = html;
+
+  } else {
+    // Flat list of individual cards (or filtered to specific email/folder)
+    container.innerHTML = sorted.map(buildSingleCardHtml).join('');
+  }
+
+  // ── Attach Events to Rendered Elements ─────────────────────────────────────
+
+  // Card click (open edit)
+  container.querySelectorAll('.entry-card, .platform-subaccount-row').forEach(row => {
+    row.addEventListener('click', e => {
+      if (e.target.closest('[data-action]')) return;
+      const id = row.dataset.id;
+      if (id) openEditModal(id);
+    });
   });
 
+  // Action buttons: copy, copy-totp, edit, add-subaccount
   container.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -1075,6 +1386,31 @@ function renderVaultList() {
       if (action === 'copy') copyPassword(id, btn);
       if (action === 'copy-totp') copyTotp(id, btn);
       if (action === 'edit') openEditModal(id);
+      if (action === 'add-subaccount') {
+        openAddModal({ name: btn.dataset.platformName, url: btn.dataset.platformUrl });
+      }
+    });
+  });
+
+  // Platform Group Header toggle collapse
+  container.querySelectorAll('.platform-group-header').forEach(header => {
+    header.addEventListener('click', e => {
+      if (e.target.closest('[data-action]')) return;
+      const key = header.dataset.toggleKey;
+      if (!key) return;
+
+      if (state.collapsedPlatformGroups.has(key)) {
+        state.collapsedPlatformGroups.delete(key);
+      } else {
+        state.collapsedPlatformGroups.add(key);
+      }
+
+      const parentCard = header.closest('.platform-group-card');
+      const listEl = parentCard?.querySelector('.platform-subaccounts-list');
+      const chevron = header.querySelector('.chevron-icon');
+
+      if (listEl) listEl.classList.toggle('collapsed');
+      if (chevron) chevron.classList.toggle('rotated');
     });
   });
 
@@ -1260,21 +1596,29 @@ async function updateTotpPreview() {
 
 // ─── Add / Edit Modal ─────────────────────────────────────────────────────────
 
-function openAddModal() {
+function openAddModal(preset = {}) {
   state.editingId = null;
 
   document.getElementById('modal-entry-title').textContent = 'Add Password';
-  document.getElementById('entry-name').value     = '';
-  document.getElementById('entry-url').value      = '';
-  document.getElementById('entry-username').value = '';
+  document.getElementById('entry-name').value     = preset.name || '';
+  document.getElementById('entry-url').value      = preset.url || '';
+  document.getElementById('entry-username').value = preset.username || '';
+  document.getElementById('entry-label').value    = preset.label || '';
+  document.getElementById('entry-folder').value   = preset.folder || (state.pwdGroupMode === 'folders' && state.pwdFolderFilter !== 'all' ? state.pwdFolderFilter : '');
   document.getElementById('entry-password').value = '';
   document.getElementById('entry-totp').value     = '';
   document.getElementById('entry-notes').value    = '';
   document.getElementById('entry-totp-preview').classList.add('hidden');
   document.getElementById('modal-entry-delete').classList.add('hidden');
 
+  updateFolderDatalist();
+
   showModal('modal-entry');
-  document.getElementById('entry-name').focus();
+  if (preset.name && !preset.username) {
+    document.getElementById('entry-username').focus();
+  } else {
+    document.getElementById('entry-name').focus();
+  }
 }
 
 function openEditModal(id) {
@@ -1285,12 +1629,15 @@ function openEditModal(id) {
   document.getElementById('modal-entry-title').textContent = 'Edit Password';
   document.getElementById('entry-name').value     = entry.name;
   document.getElementById('entry-url').value      = entry.url      || '';
-  document.getElementById('entry-username').value = entry.username;
-  document.getElementById('entry-password').value = entry.password;
+  document.getElementById('entry-username').value = entry.username || '';
+  document.getElementById('entry-label').value    = entry.label    || '';
+  document.getElementById('entry-folder').value   = entry.folder   || '';
+  document.getElementById('entry-password').value = entry.password || '';
   document.getElementById('entry-totp').value     = entry.totp     || '';
   document.getElementById('entry-notes').value    = entry.notes    || '';
   document.getElementById('modal-entry-delete').classList.remove('hidden');
 
+  updateFolderDatalist();
   updateTotpPreview();
   showModal('modal-entry');
 }
@@ -1299,6 +1646,8 @@ async function saveEntry() {
   const name     = document.getElementById('entry-name').value.trim();
   const url      = document.getElementById('entry-url').value.trim();
   const username = document.getElementById('entry-username').value.trim();
+  const label    = document.getElementById('entry-label').value.trim();
+  const folder   = document.getElementById('entry-folder').value.trim();
   const password = document.getElementById('entry-password').value;
   const totp     = document.getElementById('entry-totp').value.trim();
   const notes    = document.getElementById('entry-notes').value.trim();
@@ -1325,7 +1674,7 @@ async function saveEntry() {
     if (idx !== -1) {
       state.vault.entries[idx] = {
         ...state.vault.entries[idx],
-        name, url, username, password, totp, notes,
+        name, url, username, label, folder, password, totp, notes,
         updated_at: now,
       };
     }
@@ -1333,7 +1682,7 @@ async function saveEntry() {
     // Create new
     state.vault.entries.push({
       id:         uuid(),
-      name, url, username, password, totp, notes,
+      name, url, username, label, folder, password, totp, notes,
       created_at: now,
       updated_at: now,
     });
