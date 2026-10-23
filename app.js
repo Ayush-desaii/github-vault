@@ -91,6 +91,12 @@ const state = {
   editingCardId: null,
   selectedCardTheme: 'card-theme-black',
   cardMode: 'card', // 'card' | 'bank'
+
+  // Passwords grouping & filters
+  pwdGroupMode: 'platforms',
+  pwdEmailFilter: 'all',
+  pwdFolderFilter: 'all',
+  collapsedPlatformGroups: new Set(),
 };
 
 // ─── Screen Management ────────────────────────────────────────────────────────
@@ -827,13 +833,22 @@ async function handleFullUnlock(quickType) {
     const { data, key, salt } = await Crypto.decryptVault(state.vaultBlob, masterSecret);
 
     state.vault     = data;
-    if (state.vault && !state.vault.notes) state.vault.notes = [];
-    if (state.vault && !state.vault.docs)  state.vault.docs  = [];
-    if (state.vault && !state.vault.cards) state.vault.cards = [];
+    if (state.vault && !state.vault.entries) state.vault.entries = [];
+    if (state.vault && !state.vault.notes)   state.vault.notes   = [];
+    if (state.vault && !state.vault.docs)    state.vault.docs    = [];
+    if (state.vault && !state.vault.cards)   state.vault.cards   = [];
     state.vaultKey     = key;
     state.vaultSalt    = salt;
     state.vaultSha     = sessionGet('vault_sha');
     state.masterSecret = masterSecret;
+
+    state.pwdGroupMode = state.pwdGroupMode || 'platforms';
+    state.pwdEmailFilter = 'all';
+    state.pwdFolderFilter = 'all';
+    state.collapsedPlatformGroups = state.collapsedPlatformGroups || new Set();
+    state.searchQuery = '';
+    const searchInputFull = document.getElementById('vault-search');
+    if (searchInputFull) searchInputFull.value = '';
 
     // Persist quick unlock preferences in config
     if (state.config) {
@@ -891,13 +906,22 @@ async function handleQuickUnlock(quickSecret) {
     const data  = JSON.parse(new TextDecoder().decode(ptBuf));
 
     state.vault     = data;
-    if (state.vault && !state.vault.notes) state.vault.notes = [];
-    if (state.vault && !state.vault.docs)  state.vault.docs  = [];
-    if (state.vault && !state.vault.cards) state.vault.cards = [];
+    if (state.vault && !state.vault.entries) state.vault.entries = [];
+    if (state.vault && !state.vault.notes)   state.vault.notes   = [];
+    if (state.vault && !state.vault.docs)    state.vault.docs    = [];
+    if (state.vault && !state.vault.cards)   state.vault.cards   = [];
     state.vaultKey  = key;
     state.vaultSalt = salt;
     state.vaultBlob = blob;
     state.vaultSha  = sessionGet('vault_sha');
+
+    state.pwdGroupMode = state.pwdGroupMode || 'platforms';
+    state.pwdEmailFilter = 'all';
+    state.pwdFolderFilter = 'all';
+    state.collapsedPlatformGroups = state.collapsedPlatformGroups || new Set();
+    state.searchQuery = '';
+    const searchInputQuick = document.getElementById('vault-search');
+    if (searchInputQuick) searchInputQuick.value = '';
 
     showScreen('vault');
     renderActiveTab();
@@ -933,6 +957,14 @@ function lockVault() {
   state.vaultKey     = null;
   state.vaultSalt    = null;
   state.masterSecret = null;
+
+  // Reset view & filter state
+  state.searchQuery = '';
+  state.pwdEmailFilter = 'all';
+  state.pwdFolderFilter = 'all';
+  state.collapsedPlatformGroups = new Set();
+  const searchInputLock = document.getElementById('vault-search');
+  if (searchInputLock) searchInputLock.value = '';
 
   // Persist the latest blob in sessionStorage so quick-unlock
   // can decrypt without a network round-trip.
@@ -1009,7 +1041,7 @@ function updatePasswordsSubfilterBar() {
     const isAll = state.pwdEmailFilter === 'all';
     const allPill = '<button type="button" class="passwords-subfilter-pill ' + (isAll ? 'active' : '') + '" data-subfilter-email="all">All Emails (' + entries.length + ')</button>';
     const emailPills = sortedEmails.map(([email, count]) => {
-      const isAct = state.pwdEmailFilter.toLowerCase() === email.toLowerCase();
+      const isAct = (state.pwdEmailFilter || 'all').toLowerCase() === email.toLowerCase();
       return '<button type="button" class="passwords-subfilter-pill ' + (isAct ? 'active' : '') + '" data-subfilter-email="' + escapeHtml(email) + '">'
         + '<svg class="ic ic-sm" style="width:12px;height:12px;"><use href="#ic-user"/></svg>'
         + '<span>' + escapeHtml(email) + '</span>'
@@ -1040,7 +1072,7 @@ function updatePasswordsSubfilterBar() {
     const isAll = state.pwdFolderFilter === 'all';
     const allPill = '<button type="button" class="passwords-subfilter-pill ' + (isAll ? 'active' : '') + '" data-subfilter-folder="all">All Folders (' + entries.length + ')</button>';
     const folderPills = sortedFolders.map(([folder, count]) => {
-      const isAct = state.pwdFolderFilter.toLowerCase() === folder.toLowerCase();
+      const isAct = (state.pwdFolderFilter || 'all').toLowerCase() === folder.toLowerCase();
       return '<button type="button" class="passwords-subfilter-pill ' + (isAct ? 'active' : '') + '" data-subfilter-folder="' + escapeHtml(folder) + '">'
         + '<svg class="ic ic-sm" style="width:12px;height:12px;"><use href="#ic-folder"/></svg>'
         + '<span>' + escapeHtml(folder) + '</span>'
@@ -1065,7 +1097,15 @@ function updatePasswordsSubfilterBar() {
 
 function renderVaultList() {
   const container = document.getElementById('vault-list');
-  const q         = state.searchQuery.toLowerCase().trim();
+  if (!container) return;
+
+  // Sync group pill active states
+  const currentMode = state.pwdGroupMode || 'platforms';
+  document.querySelectorAll('#passwords-group-pills .journal-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.pwdGroup === currentMode);
+  });
+
+  const q         = (state.searchQuery || '').toLowerCase().trim();
   const entries   = state.vault?.entries || [];
 
   // 1. Text Search Filter
@@ -1081,12 +1121,12 @@ function renderVaultList() {
     : entries;
 
   // 2. Email Identity Sub-Filter
-  if (state.pwdGroupMode === 'emails' && state.pwdEmailFilter !== 'all') {
+  if (state.pwdGroupMode === 'emails' && state.pwdEmailFilter && state.pwdEmailFilter !== 'all') {
     filtered = filtered.filter(e => (e.username || '').toLowerCase() === state.pwdEmailFilter.toLowerCase());
   }
 
   // 3. Folder / Collection Sub-Filter
-  if (state.pwdGroupMode === 'folders' && state.pwdFolderFilter !== 'all') {
+  if (state.pwdGroupMode === 'folders' && state.pwdFolderFilter && state.pwdFolderFilter !== 'all') {
     filtered = filtered.filter(e => (e.folder || 'Unfiled').toLowerCase() === state.pwdFolderFilter.toLowerCase());
   }
 
@@ -1207,7 +1247,7 @@ function renderVaultList() {
       : letter;
 
     const domainDisplay = domain ? '<span class="entry-url">' + escapeHtml(domain) + '</span>' : '';
-    const isCollapsed = state.collapsedPlatformGroups.has(platformKey);
+    const isCollapsed = state.collapsedPlatformGroups ? state.collapsedPlatformGroups.has(platformKey) : false;
 
     const subAccountsHtml = accounts.map(entry => {
       const labelBadge = entry.label ? '<span class="account-label-badge">' + escapeHtml(entry.label) + '</span>' : '';
@@ -1378,7 +1418,28 @@ function renderVaultList() {
     });
   });
 
-  // Action buttons: copy, copy-totp, edit, add-subaccount
+  function togglePlatformCollapse(key) {
+    if (!key) return;
+    if (!state.collapsedPlatformGroups) state.collapsedPlatformGroups = new Set();
+    if (state.collapsedPlatformGroups.has(key)) {
+      state.collapsedPlatformGroups.delete(key);
+    } else {
+      state.collapsedPlatformGroups.add(key);
+    }
+    const cards = container.querySelectorAll('.platform-group-card');
+    for (const card of cards) {
+      if (card.dataset.platformKey === key) {
+        const isCollapsed = state.collapsedPlatformGroups.has(key);
+        const listEl = card.querySelector('.platform-subaccounts-list');
+        const chevron = card.querySelector('.chevron-icon');
+        if (listEl) listEl.classList.toggle('collapsed', isCollapsed);
+        if (chevron) chevron.classList.toggle('rotated', !isCollapsed);
+        break;
+      }
+    }
+  }
+
+  // Action buttons: copy, copy-totp, edit, add-subaccount, toggle-platform
   container.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -1389,28 +1450,18 @@ function renderVaultList() {
       if (action === 'add-subaccount') {
         openAddModal({ name: btn.dataset.platformName, url: btn.dataset.platformUrl });
       }
+      if (action === 'toggle-platform') {
+        togglePlatformCollapse(btn.dataset.platformKey);
+      }
     });
   });
 
-  // Platform Group Header toggle collapse
+  // Platform Group Header toggle collapse (when clicking anywhere on header)
   container.querySelectorAll('.platform-group-header').forEach(header => {
     header.addEventListener('click', e => {
       if (e.target.closest('[data-action]')) return;
       const key = header.dataset.toggleKey;
-      if (!key) return;
-
-      if (state.collapsedPlatformGroups.has(key)) {
-        state.collapsedPlatformGroups.delete(key);
-      } else {
-        state.collapsedPlatformGroups.add(key);
-      }
-
-      const parentCard = header.closest('.platform-group-card');
-      const listEl = parentCard?.querySelector('.platform-subaccounts-list');
-      const chevron = header.querySelector('.chevron-icon');
-
-      if (listEl) listEl.classList.toggle('collapsed');
-      if (chevron) chevron.classList.toggle('rotated');
+      if (key) togglePlatformCollapse(key);
     });
   });
 
@@ -3257,13 +3308,23 @@ async function triggerBiometricUnlock() {
     const { data, key, salt } = await Crypto.decryptVault(blob, masterSecret);
 
     state.vault        = data;
-    if (state.vault && !state.vault.notes) state.vault.notes = [];
-    if (state.vault && !state.vault.docs)  state.vault.docs  = [];
+    if (state.vault && !state.vault.entries) state.vault.entries = [];
+    if (state.vault && !state.vault.notes)   state.vault.notes   = [];
+    if (state.vault && !state.vault.docs)    state.vault.docs    = [];
+    if (state.vault && !state.vault.cards)   state.vault.cards   = [];
     state.vaultKey     = key;
     state.vaultSalt    = salt;
     state.vaultBlob    = blob;
     state.vaultSha     = state.vaultSha || sessionGet('vault_sha');
     state.masterSecret = masterSecret;
+
+    state.pwdGroupMode = state.pwdGroupMode || 'platforms';
+    state.pwdEmailFilter = 'all';
+    state.pwdFolderFilter = 'all';
+    state.collapsedPlatformGroups = state.collapsedPlatformGroups || new Set();
+    state.searchQuery = '';
+    const searchInputBio = document.getElementById('vault-search');
+    if (searchInputBio) searchInputBio.value = '';
 
     // Cache wrapped key for quick session unlock
     const parts = masterSecret.split('\x00');
@@ -4071,6 +4132,18 @@ function initEventListeners() {
   document.getElementById('vault-search').addEventListener('input', e => {
     state.searchQuery = e.target.value;
     renderVaultList();
+  });
+
+  // ── Passwords Group Mode Pills (Platforms, By Email, Folders, All Accounts) ──
+  document.querySelectorAll('#passwords-group-pills .journal-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('#passwords-group-pills .journal-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      state.pwdGroupMode = pill.dataset.pwdGroup || 'platforms';
+      state.pwdEmailFilter = 'all';
+      state.pwdFolderFilter = 'all';
+      renderVaultList();
+    });
   });
 
   // ── Cards Search & Filter ─────────────────────────────────────────────────
